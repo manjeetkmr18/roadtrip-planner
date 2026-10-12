@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.5
+        env:
+          POSTGRES_USER: rtp
+          POSTGRES_PASSWORD: rtp
+          POSTGRES_DB: roadtrip
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rtp" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://rtp:rtp@localhost:5432/roadtrip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @rtp/core build
+      - run: pnpm -r typecheck
+      - run: pnpm -r test
+      - run: pnpm --filter @rtp/api build
+      - name: Apply migrations
+        run: pnpm --filter @rtp/api db:migrate
+      - run: pnpm --filter @rtp/web build

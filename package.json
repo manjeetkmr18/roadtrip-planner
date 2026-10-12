@@ -1,0 +1,20 @@
+{
+  "name": "roadtrip-planner",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter @rtp/core build && pnpm -r --filter=!@rtp/core build",
+    "dev": "pnpm --filter @rtp/core build && pnpm -r --parallel --filter=!@rtp/core dev",
+    "dev:api": "pnpm --filter @rtp/api dev",
+    "dev:web": "pnpm --filter @rtp/web dev",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm --filter @rtp/core build && pnpm -r typecheck",
+    "db:generate": "pnpm --filter @rtp/api db:generate",
+    "db:migrate": "pnpm --filter @rtp/api db:migrate",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down"
+  }
+}
