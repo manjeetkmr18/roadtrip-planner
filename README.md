@@ -1,122 +1,114 @@
-# Road Trip Planner
+# Road Trip Planner — Backend API
 
-**Know the real cost and a doable plan before you go.** A road-trip planner for Canada and cross-border US trips that itemises every toll (including the 407 ETR, which Google can't price), fuel or charging, and parking as a **low / typical / high** range. It reviews the **weather for every driving day** and splits the drive into days that fit your limit. Code, not the AI, checks each plan for driving hours, opening hours and stop order.
+NestJS API that plans Canada / cross-border road trips: routes, an itemised **low / typical / high** trip cost (tolls, the 407 ETR, fuel or charging, parking), a weather review for every driving day, realistic driving days, and stops checked against opening hours.
 
-Planning only: no bookings. Every number shows its source and a confidence label (verified, provider estimate, approximate, or unknown). Unknown tolls are never counted as $0.
+The frontend is a separate app: **[roadtrip-planner-web](https://github.com/manjeetkmr18/roadtrip-planner-web)**. It talks to this API over HTTP.
 
-## What's in the repo
+## Stack
 
-```
-apps/api        NestJS 12 API (ESM) · Postgres/PostGIS via Drizzle · BullMQ worker · provider adapters
-apps/web        Next.js 16 (App Router) · Tailwind 4 · Google Maps via @vis.gl/react-google-maps
-packages/core   Shared types (zod) and deterministic trip logic, fully unit-tested:
-                cost scenarios, 407 ETR calculator, fuel/charging, weather review, day splitting, feasibility
-scripts/smoke.sh  End-to-end test against a running API
-```
-
-### How a plan is made
-
-1. **Places**: Google Geocoding resolves the origin, destination and stops.
-2. **Routes**: Google Routes API returns the fastest route, an alternative and an avoid-tolls route, with `TOLLS` extra computation. Round trips also get the return leg.
-3. **Costs, per route**:
-   - **407 ETR**: our own calculator, using the operator's published 2026 rates by zone, time of entry and weekday/weekend/holiday. It includes the $1 trip charge, plus the camera charge and monthly account fee when you have no transponder. Steps are split at Brock Road, so the provincial 407 East shows separately.
-   - **Other tolls**: Google's estimate. If a toll exists but has no price, it is shown as **Unknown**.
-   - **TollGuru** (optional): cross-checks the fastest route. When its route matches within 8%, its all-tolls figure replaces the Google and 407 lines, so nothing is counted twice.
-   - **Fuel / charging**: your consumption × distance × a regional price range, with winter and real-world multipliers.
-   - **Parking**: an estimate from the number and type of stops.
-   - USD amounts are converted to CAD at a configured rate, labelled approximate.
-4. **Days**: the route is split into even driving days within your daily limit. A cut can fall inside a long highway step; the overnight area is then placed along that step's polyline and named by reverse geocoding. Free days go at the destination, and return days come last.
-5. **Weather**: forecasts at the start, middle and end of each driving day.
-   - Sources: **Environment Canada (MSC GeoMet)** in Canada and the **US National Weather Service** in the US, plus official alerts. Both are free.
-   - Each day is rated *favourable / mixed / poor (per forecast)*, using the daytime forecast, with suggestions. Days outside the ~6-day forecast window say so.
-6. **Stops**: Google Places text search *along the route* (or near the destination on free days). Candidates are ranked by rating × review volume minus detour.
-7. **AI (Amazon Bedrock)** picks and describes stops **only from those candidates**. Output is validated: invented IDs are dropped. If Bedrock is off or fails, the deterministic ranking is used.
-8. **Checks (code)**: scheduled arrival times with rest breaks, opening hours, stop order, daily driving limit, day length by pace, late arrival, trip too short, past end date, border crossing, poor-weather days, and road closures from **Ontario 511**.
-9. **Advisories**: Government of Canada travel advisories (open data) for countries outside Canada.
-
-Each generation records its estimated API spend (Google, TollGuru, model tokens at list prices) on the trip and in the `generations` table. The **free-plan limit** (`FREE_TRIPS_PER_MONTH`) is enforced per user.
+NestJS 12 (ESM) · PostgreSQL 16 + PostGIS (Drizzle ORM) · Redis + BullMQ (background trip generation) · Amazon Bedrock · Node 22+, npm
 
 ## Run it locally
 
-Requirements: Node 22+, pnpm 10, Docker (or local Postgres 16 with PostGIS, and Redis 7).
-
 ```bash
-pnpm install
-pnpm infra:up                         # Postgres+PostGIS and Redis via docker compose
-cp apps/api/.env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env.local
-pnpm --filter @rtp/core build
-pnpm --filter @rtp/api build && pnpm db:migrate
-pnpm dev                              # API on :4000, web on :3000
+npm install
+cp .env.example .env          # add your keys (all optional; see below)
+npm run infra:up              # Postgres+PostGIS and Redis via Docker
+npm run build
+npm run db:migrate
+npm run dev                   # http://localhost:4000/api
 ```
 
-Open http://localhost:3000, create an account and plan a trip.
+Check it: `curl localhost:4000/api/health` shows which integrations are live.
 
-**Without any keys** the app still works end to end:
-- Routes, places and stops use clearly labelled **sample data**, from a built-in list of major Canadian/US cities.
-- Weather, alerts and travel advisories are **live**, since they're free public APIs.
-
-Set `QUEUE_INLINE=true` to skip Redis during development.
-
-Smoke test against the running API:
+Smoke test (register → create trip → generate → print the plan):
 
 ```bash
-./scripts/smoke.sh "Mississauga, ON" "Ottawa, ON" 2026-10-20 2026-10-22
+npm run smoke
+# or: bash scripts/smoke.sh "Mississauga, ON" "Ottawa, ON" 2026-10-20 2026-10-22
 ```
 
-`GET /api/health` shows which integrations are live.
+**No keys yet?** It still runs end to end.
+- Routes and stops use clearly labelled **sample data**.
+- Weather, alerts and travel advisories are **live** (free government APIs).
+- Set `QUEUE_INLINE=true` to run without Redis.
 
-## API keys
+## Folder layout
 
-| Variable | Where | Used for | Cost |
-|---|---|---|---|
-| `GOOGLE_MAPS_API_KEY` (api) | Google Cloud: enable **Geocoding API**, **Routes API**, **Places API (New)** | Places, routes, tolls, stops | Pay-as-you-go with monthly free caps per SKU |
-| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` (web) | Separate **browser** key, Maps JavaScript API, restricted by referrer | Interactive map (else an SVG sketch) | Dynamic Maps SKU |
-| `TOLLGURU_API_KEY` | tollguru.com | Toll cross-check / Canada toll coverage | From $80/mo for 5,000 calls |
-| `AWS_REGION`, `BEDROCK_MODEL_ID` (+ AWS credentials) | Amazon Bedrock with model access enabled | Choosing and describing stops | Per token |
-| `ONTARIO_511_API_KEY` | 511on.ca developer key (free) | Road closures on Ontario highways | Free; 10 calls/min, cached 5 min |
-| `OILPRICEAPI_KEY` | oilpriceapi.com | Provincial gasoline averages (Canada) | Free tier |
-| `EIA_API_KEY` | eia.gov (free) | Weekly US fuel prices | Free |
-| none | Environment Canada, NWS, Global Affairs Canada | Weather, alerts, advisories | Free |
+```
+src/
+  core/        Trip logic, no I/O, fully unit-tested
+               407 ETR rates, cost scenarios, fuel, weather review,
+               day splitting, scheduling, feasibility checks, types
+  providers/   External APIs
+               Google (geocoding, routes, places), TollGuru, Bedrock,
+               Environment Canada + NWS weather, Ontario 511, travel advisories, fuel prices
+  planning/    The trip planner that ties it together (planner.ts), cost lines per route, stop selection
+  trips/       Trips API, BullMQ queue + worker, sharing
+  auth/        Register / login (JWT)
+  db/          Drizzle schema + migration runner (migrations in /drizzle)
+  misc.ts      Feedback + health endpoints
+  main.ts      App entry
+```
 
-Without the fuel keys, fuel prices fall back to planning defaults, which are clearly labelled.
+## How a plan is made
+
+1. **Find the places.** Geocode the origin, destination and any stops (Google).
+2. **Get the routes.** Fastest, alternative and avoid-tolls routes, with toll info (Google Routes). Round trips also get a return leg.
+3. **Cost each route.**
+   - The **407 ETR** uses our own calculator from the published 2026 rates, since Google can't price it.
+   - Other tolls come from Google.
+   - **TollGuru** cross-checks tolls without double counting.
+   - Fuel and parking are estimated.
+   - Unknown tolls are listed, never counted as $0.
+4. **Split into driving days.** Days are even and stay within the user's daily limit; overnight areas are named.
+5. **Check the weather for each day.** Forecasts come from Environment Canada or the US National Weather Service, plus official alerts. Each day is rated favourable / mixed / poor, with suggestions.
+6. **Find stops.** Search for places along the route (Google Places), then rank them.
+7. **Arrange the days.** Bedrock picks and describes stops, but only from the list it was given. Without Bedrock, the ranking is used as-is.
+8. **Run the checks in code.** Driving hours, opening hours, stop order, day length, late arrival, trip length, border crossing, road closures (Ontario 511) and travel advisories.
+
+## API keys (`.env`)
+
+| Variable | Used for | Notes |
+|---|---|---|
+| `GOOGLE_MAPS_API_KEY` | Geocoding, Routes (tolls), Places (New) | Server key, restrict by API + IP |
+| `TOLLGURU_API_KEY` | Toll cross-check / Canada tolls | Optional |
+| `AWS_REGION`, `BEDROCK_MODEL_ID` + AWS credentials | Stop choice and day descriptions | Model must be enabled in Bedrock |
+| `ONTARIO_511_API_KEY` | Road closures | Free key from 511on.ca |
+| `OILPRICEAPI_KEY`, `EIA_API_KEY` | Current fuel prices (Canada / US) | Free tiers; otherwise labelled defaults |
+
+Weather (Environment Canada, NWS) and travel advisories (Global Affairs Canada) need no keys.
 
 ### Things to verify with your accounts
 
-- **Google SKUs**: requests with tolls, and Places requests with rating/opening-hours fields, bill at higher tiers. The cost meter assumes Routes $15/1k and Text Search Enterprise $35/1k (`apps/api/src/providers/infra.ts`). Confirm against your billing console.
-- **Google terms**: place IDs may be stored indefinitely. Other Places content is refreshed on each generation, and Google data is shown on a Google map when the browser key is set. Review the terms before adding caching.
-- **407 ETR rates** are in `packages/core/src/etr407.ts`. Update them each January, when the operator publishes new rates. The weekend chart publishes two tables, one per direction, without labels; the range covers both.
-- **Bedrock model ID**: use a model or inference profile enabled in your region. Set `LLM_*_USD_PER_MTOK` to its price.
+- **Google pricing:** the cost meter in `src/providers/infra.ts` assumes Routes with tolls at $15/1k and Places Text Search (Enterprise fields) at $35/1k. Confirm in your billing console.
+- **407 ETR rates:** stored in `src/core/etr407.ts`. Update them every January.
+
+## Endpoints
+
+```
+POST /api/auth/register   POST /api/auth/login   GET /api/auth/me
+GET  /api/trips           POST /api/trips        GET | PUT | DELETE /api/trips/:id
+POST /api/trips/:id/generate     (plan or refresh)       GET /api/trips/usage
+POST /api/trips/:id/share        GET /api/share/:token   (public, read-only)
+GET  /api/trips/saved-stops/nearby?lat=&lng=&radiusKm=   (PostGIS)
+POST /api/feedback               GET /api/health
+```
+
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | API with auto-reload |
+| `npm run build` / `npm start` | Production build / run |
+| `npm test` | 36 unit tests |
+| `npm run typecheck` | TypeScript check |
+| `npm run db:generate` | New migration after changing `src/db/schema.ts` |
+| `npm run db:migrate` | Apply migrations (enables PostGIS) |
+| `npm run smoke` | End-to-end test against a running API |
 
 ## Production notes
 
-- The BullMQ worker runs inside the API process (`concurrency: 3`). To scale, run more API instances; they share the Redis queue.
-- Set a strong `JWT_SECRET` (startup fails in production otherwise), `WEB_ORIGIN` for CORS, and `PROVIDER_MODE=auto`.
-- Keep the server Google key restricted by API and server IP. Never ship it to the browser.
-
-## API
-
-```
-POST /api/auth/register | /api/auth/login        GET /api/auth/me
-GET  /api/trips          POST /api/trips          GET|PUT|DELETE /api/trips/:id
-POST /api/trips/:id/generate   (queue a plan or refresh)       GET /api/trips/usage
-POST /api/trips/:id/share      GET /api/share/:token (public, read-only)
-GET  /api/trips/saved-stops/nearby?lat=&lng=&radiusKm=   (PostGIS)
-POST /api/feedback       ("report incorrect info")          GET /api/health
-```
-
-## Tests
-
-```bash
-pnpm -r test        # core: 18 tests (407 rates, holidays, costs, weather, day splitting, feasibility)
-                    # api: 18 tests (toll logic, TollGuru de-duplication, planner end to end, adapter parsing)
-pnpm -r typecheck
-```
-
-## Not built yet
-
-- Mobile apps: the API is ready for React Native.
-- Climate averages for dates beyond the forecast window: currently shown as "refresh closer to departure".
-- Parking data from operators. Today parking is an estimate.
-- Payments for the paid plan: the free-plan limit is enforced, but there is no checkout.
-- Road-closure feeds outside Ontario (other provinces and states have their own 511 APIs).
+- Set a strong `JWT_SECRET`; the app refuses to start in production without one.
+- Set `WEB_ORIGIN` to the frontend URL. It controls CORS; separate several URLs with commas.
+- The BullMQ worker runs inside the API process. Add more instances to scale.

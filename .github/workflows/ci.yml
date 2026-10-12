@@ -22,16 +22,12 @@ jobs:
       DATABASE_URL: postgres://rtp:rtp@localhost:5432/roadtrip
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @rtp/core build
-      - run: pnpm -r typecheck
-      - run: pnpm -r test
-      - run: pnpm --filter @rtp/api build
-      - name: Apply migrations
-        run: pnpm --filter @rtp/api db:migrate
-      - run: pnpm --filter @rtp/web build
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run db:migrate
