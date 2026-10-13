@@ -98,7 +98,7 @@ export class TripsService {
     const usage = await this.usage(user);
     if (usage.limit != null && usage.usedThisMonth >= usage.limit) {
       throw new HttpException(
-        `You've used your ${usage.limit} free trip plans this month. Upgrade for unlimited plans.`,
+        `You’ve used your ${usage.limit} free trip plans this month. Your saved trips stay available, and you can plan again next month.`,
         HttpStatus.PAYMENT_REQUIRED,
       );
     }

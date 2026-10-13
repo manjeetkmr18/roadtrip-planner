@@ -9,15 +9,32 @@ const ORDER: Record<WeatherRating, number> = { unknown: -1, favourable: 0, mixed
 
 export interface ObservationAssessment {
   rating: WeatherRating;
+  /** Conditions worth mentioning, e.g. "Rain likely (80%)". */
+  conditions: string[];
+  /** Full reasons with the place, e.g. "Rain likely (80%) — Ottawa, ON (forecast for Ottawa)". */
   reasons: string[];
 }
 
+/** Short place for headlines: drops "(forecast for …)" and shortens "en route (A → B)". */
+export function shortPlace(place: string): string {
+  if (place.startsWith('en route')) return 'en route';
+  return place.replace(/ \(forecast for .*\)$/, '');
+}
+
+/** "A", "A and b", "A, b and c". */
+function joinConditions(items: string[]): string {
+  const [first, ...rest] = items;
+  const tail = rest.map((x) => x.charAt(0).toLowerCase() + x.slice(1));
+  if (!tail.length) return first;
+  return `${[first, ...tail.slice(0, -1)].join(', ')} and ${tail[tail.length - 1]}`;
+}
+
 export function assessObservation(o: WeatherObservation): ObservationAssessment {
-  if (o.kind !== 'forecast') return { rating: 'unknown', reasons: [] };
-  const reasons: string[] = [];
+  if (o.kind !== 'forecast') return { rating: 'unknown', conditions: [], reasons: [] };
+  const conditions: string[] = [];
   let rating: WeatherRating = 'favourable';
   const bump = (r: WeatherRating, why: string) => {
-    reasons.push(why);
+    conditions.push(why);
     if (ORDER[r] > ORDER[rating]) rating = r;
   };
   const pop = o.precipChancePct ?? 0;
@@ -26,20 +43,20 @@ export function assessObservation(o: WeatherObservation): ObservationAssessment 
     if (a.severity === 'warning') bump('poor', `${a.title} in effect (${a.issuedBy})`);
     else if (a.severity === 'watch' || a.severity === 'advisory') bump('mixed', `${a.title} (${a.issuedBy})`);
   }
-  if (o.snow && pop >= 60) bump('poor', `Snow likely (${pop}% chance) — ${o.place}`);
-  else if (o.snow) bump('mixed', `Possible snow — ${o.place}`);
-  if (o.thunder && pop >= 70) bump('poor', `Thunderstorms likely — ${o.place}`);
-  else if (o.thunder) bump('mixed', `Risk of thunderstorms — ${o.place}`);
-  if (!o.snow && pop >= 70) bump('mixed', `Rain likely (${pop}%) — ${o.place}`);
-  else if (!o.snow && pop >= 40) bump('mixed', `${pop}% chance of rain — ${o.place}`);
+  if (o.snow && pop >= 60) bump('poor', `Snow likely (${pop}% chance)`);
+  else if (o.snow) bump('mixed', 'Possible snow');
+  if (o.thunder && pop >= 70) bump('poor', 'Thunderstorms likely');
+  else if (o.thunder) bump('mixed', 'Risk of thunderstorms');
+  if (!o.snow && pop >= 70) bump('mixed', `Rain likely (${pop}%)`);
+  else if (!o.snow && pop >= 40) bump('mixed', `${pop}% chance of rain`);
   const gust = o.gustKmh ?? o.windKmh ?? 0;
-  if (gust >= 70) bump('poor', `Gusts near ${gust} km/h — ${o.place}`);
-  else if (gust >= 50) bump('mixed', `Gusty wind (${gust} km/h) — ${o.place}`);
-  if (o.fog) bump('mixed', `Fog — ${o.place}`);
-  if (o.highC != null && o.highC >= 33) bump('mixed', `Hot: high of ${o.highC}°C — ${o.place}`);
-  if (o.lowC != null && o.lowC <= -15) bump('mixed', `Very cold: low of ${o.lowC}°C — ${o.place}`);
-  if (o.lowC != null && o.lowC <= 0 && pop >= 50 && !o.snow) bump('mixed', `Freezing temperatures with precipitation — ${o.place}`);
-  return { rating, reasons };
+  if (gust >= 70) bump('poor', `Gusts near ${gust} km/h`);
+  else if (gust >= 50) bump('mixed', `Gusty wind (${gust} km/h)`);
+  if (o.fog) bump('mixed', 'Fog');
+  if (o.highC != null && o.highC >= 33) bump('mixed', `Hot: high of ${o.highC}°C`);
+  if (o.lowC != null && o.lowC <= -15) bump('mixed', `Very cold: low of ${o.lowC}°C`);
+  if (o.lowC != null && o.lowC <= 0 && pop >= 50 && !o.snow) bump('mixed', 'Freezing temperatures with precipitation');
+  return { rating, conditions, reasons: conditions.map((c) => `${c} — ${o.place}`) };
 }
 
 export function reviewDay(args: {
@@ -66,11 +83,18 @@ export function reviewDay(args: {
   }
 
   let rating: WeatherRating = 'favourable';
-  const reasons: string[] = [];
-  for (const a of assessed) {
+  // Group conditions by place so the headline names each place once: "Rain likely (80%) and fog — Ottawa, ON".
+  const byPlace = new Map<string, string[]>();
+  for (let i = 0; i < assessed.length; i++) {
+    const a = assessed[i];
     if (ORDER[a.rating] > ORDER[rating]) rating = a.rating;
-    reasons.push(...a.reasons);
+    if (!a.conditions.length) continue;
+    const place = shortPlace(observations[i].place);
+    const list = byPlace.get(place) ?? [];
+    for (const c of a.conditions) if (!list.includes(c)) list.push(c);
+    byPlace.set(place, list);
   }
+  const reasons = [...byPlace].map(([place, conds]) => `${joinConditions(conds.slice(0, 3))} — ${place}`);
 
   const suggestions: string[] = [];
   const any = (f: (o: WeatherObservation) => boolean) => forecasts.some(f);

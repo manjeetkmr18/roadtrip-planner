@@ -146,6 +146,18 @@ describe('weather review', () => {
     const r = reviewDay({ date: '2026-07-01', hasOutdoorStops: true, drivingHours: 4, observations: [{ date: '2026-07-01', place: 'Kingston', kind: 'forecast', precipChancePct: 10, highC: 26, alerts: [] }] });
     expect(r.rating).toBe('favourable');
   });
+  it('names each place once in the headline, without the forecast-city suffix', () => {
+    const r = reviewDay({
+      date: '2026-10-16',
+      hasOutdoorStops: true,
+      drivingHours: 0,
+      observations: [
+        { date: '2026-10-16', place: 'Ottawa, ON (forecast for Ottawa (Kanata - Orléans))', kind: 'forecast', precipChancePct: 80, lowC: -1, alerts: [] },
+        { date: '2026-10-16', place: 'en route (Ottawa, ON → Kingston, ON)', kind: 'forecast', precipChancePct: 45, alerts: [] },
+      ],
+    });
+    expect(r.headline).toBe('Mixed (per forecast): Rain likely (80%) and freezing temperatures with precipitation — Ottawa, ON; 45% chance of rain — en route.');
+  });
 });
 
 describe('itinerary', () => {
