@@ -10,3 +10,6 @@ coverage
 !.env.example
 .DS_Store
 next-env.d.ts
+
+# Local Redis snapshot
+dump.rdb
