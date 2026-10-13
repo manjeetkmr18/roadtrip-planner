@@ -2,7 +2,7 @@
 
 NestJS API that plans Canada / cross-border road trips: routes, an itemised **low / typical / high** trip cost (tolls, the 407 ETR, fuel or charging, parking), a weather review for every driving day, realistic driving days, and stops checked against opening hours.
 
-The frontend is a separate app: **[roadtrip-planner-web](https://github.com/manjeetkmr18/roadtrip-planner-web)**. It talks to this API over HTTP.
+The app is a separate repo: **[roadtrip-planner-app](https://github.com/manjeetkmr18/roadtrip-planner-app)**. It's a single Expo (React Native) codebase for iOS, Android and web, and it talks to this API over HTTP.
 
 ## Stack
 
@@ -110,5 +110,6 @@ POST /api/feedback               GET /api/health
 ## Production notes
 
 - Set a strong `JWT_SECRET`; the app refuses to start in production without one.
-- Set `WEB_ORIGIN` to the frontend URL. It controls CORS; separate several URLs with commas.
+- Set `WEB_ORIGIN` to the web app's URL. It controls CORS for browsers; separate several URLs with commas. The iOS and Android apps don't need it.
+- Phones reach the API over your network, so in development the API must be reachable from the phone (same Wi-Fi). It already listens on all network interfaces.
 - The BullMQ worker runs inside the API process. Add more instances to scale.

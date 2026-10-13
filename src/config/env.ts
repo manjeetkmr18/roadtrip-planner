@@ -12,7 +12,8 @@ const optional = z
 export const EnvSchema = z.object({
   NODE_ENV: z.string().default('development'),
   PORT: z.coerce.number().default(4000),
-  WEB_ORIGIN: z.string().default('http://localhost:3000'),
+  /** Browser origins allowed by CORS (comma-separated). 8081 is the Expo web dev server. Native apps don't need CORS. */
+  WEB_ORIGIN: z.string().default('http://localhost:8081,http://localhost:3000'),
 
   DATABASE_URL: z.string().default('postgres://rtp:rtp@localhost:5432/roadtrip'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
