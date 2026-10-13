@@ -146,7 +146,7 @@ export function mentions407(text: string): boolean {
 
 /**
  * The privately operated 407 ETR runs from the QEW (Burlington) to Brock Road (Pickering).
- * East of Brock Road it continues as the provincially tolled Highway 407, priced differently.
+ * East of Brock Road it continues as the provincially owned Highway 407 East, which has been toll-free since June 1, 2025.
  * Directions in instructions ("407 E") are compass directions, so we split by longitude.
  */
 export const ETR407_EAST_END_LNG = -79.09;

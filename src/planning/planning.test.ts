@@ -133,6 +133,22 @@ describe('legCostLines', () => {
     const eb = b.find((l) => l.category === 'etr407')!;
     expect(ea.typical! - eb.typical!).toBeCloseTo(5, 2);
   });
+
+  it('charges nothing for Highway 407 East (toll-free since June 1, 2025)', async () => {
+    const steps: RouteStep[] = [
+      {
+        distanceMeters: 40_000,
+        durationSeconds: 1500,
+        instruction: 'Continue onto ON-407 E',
+        polyline: encodePolyline([{ lat: 43.86, lng: -79.3 }, { lat: 43.87, lng: -79.09 }, { lat: 43.9, lng: -78.85 }]),
+        roads: [],
+      },
+    ];
+    const lines = await legCostLines({ ...base, raw: raw(null, steps) }, req, providers(), new ProviderContext(), 1.4);
+    expect(lines.filter((l) => l.typical == null)).toHaveLength(0);
+    const etr = lines.find((l) => l.category === 'etr407')!;
+    expect(etr.assumptions.join(' ')).toMatch(/407 East .* toll-free since June 1, 2025/);
+  });
 });
 
 describe('stops', () => {

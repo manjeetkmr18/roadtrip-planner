@@ -39,7 +39,7 @@ function splitByEtrSection(s: RouteStep): { etr: number; provincial: number } {
   return { etr, provincial };
 }
 
-/** Find kilometres on the 407 ETR (and on the provincial 407 East) from route steps. */
+/** Find kilometres on the tolled 407 ETR (and on the toll-free provincial 407 East) from route steps. */
 export function find407(steps: RouteStep[]): TollSegments {
   let offset = 0;
   let etrKm = 0;
@@ -120,13 +120,16 @@ export async function legCostLines(input: RouteCostInput, req: TripRequest, prov
       currency: 'CAD',
       confidence: 'approximate',
       mandatory: true,
-      assumptions: [...e.assumptions, 'Billed later by licence plate if you have no transponder'],
+      assumptions: [
+        ...e.assumptions,
+        'Billed later by licence plate if you have no transponder',
+        ...(seg.provincial407Km > 0.5 ? [`${Math.round(seg.provincial407Km)} km on Highway 407 East (east of Brock Road) not charged: toll-free since June 1, 2025`] : []),
+      ],
       source: { name: '407 ETR published 2026 light-vehicle rates', url: 'https://www.407etr.com/en/rate-chart-light', retrievedAt },
     });
   }
-  if (seg.provincial407Km > 0.5) {
-    lines.push(unknownTollLine(`${id}-407east`, `${lp}Highway 407 East (provincial toll, ${Math.round(seg.provincial407Km)} km)`, currency, googleSource));
-  }
+  // Highway 407 East (Brock Road to Highway 35/115) is provincially owned and has been toll-free since
+  // June 1, 2025, so kilometres east of Brock Road add no cost line.
 
   // 2. Other tolls from Google
   if (raw.toll?.known) {
