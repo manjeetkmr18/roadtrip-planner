@@ -117,8 +117,10 @@ export async function chooseStops(
 ): Promise<Map<number, { ids: string[]; narrative: string; byModel: boolean }>> {
   const fallback = new Map<number, { ids: string[]; narrative: string; byModel: boolean }>();
   for (const d of days) {
-    const ids = d.candidates.slice(0, d.budget).map((c) => c.place.id);
-    const names = d.candidates.slice(0, d.budget).map((c) => c.place.name);
+    const chosen = d.candidates.slice(0, d.budget);
+    const ids = chosen.map((c) => c.place.id);
+    // Name stops in the order they're driven past.
+    const names = [...chosen].sort((a, b) => a.routeFraction - b.routeFraction).map((c) => c.place.name);
     const via = d.via?.length ? ` via ${d.via.join(' and ')}` : '';
     const narrative =
       d.drivingHours > 0
