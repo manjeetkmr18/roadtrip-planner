@@ -2,8 +2,11 @@ import {
   addDays,
   daysBetween,
   decodePolyline,
+  DEFAULT_VISIT_MINUTES,
+  distanceToRoute,
   drivingDaysNeeded,
   encodePolyline,
+  fractionAlong,
   parseHHMM,
   reviewDay,
   bestOutdoorDay,
@@ -268,6 +271,35 @@ export class TripPlanner {
     }
     if (selRet) await pushDriving(retSegs, origin);
 
+    // Stops the traveller added go on the driving day that passes closest to them, on each leg
+    // (the route runs through them both ways).
+    const addedStops = new Map<number, Stop[]>();
+    const placeAddedStops = (legDrafts: Draft[]) => {
+      waypoints.forEach((w, k) => {
+        let best: { d: Draft; meters: number } | undefined;
+        for (const d of legDrafts) {
+          if (!d.line?.length) continue;
+          const meters = distanceToRoute(d.line, w.location);
+          if (!best || meters < best.meters) best = { d, meters };
+        }
+        if (!best || best.meters > 50_000) return;
+        const list = addedStops.get(best.d.day.day) ?? [];
+        list.push({
+          id: `waypoint-${k + 1}-day-${best.d.day.day}`,
+          name: w.label,
+          kind: 'waypoint',
+          location: w.location,
+          visitMinutes: DEFAULT_VISIT_MINUTES.waypoint,
+          routeFraction: Math.round(fractionAlong(best.d.line!, w.location) * 1000) / 1000,
+          detourMinutes: 0,
+          description: 'A stop you added',
+        });
+        addedStops.set(best.d.day.day, list);
+      });
+    };
+    placeAddedStops(drafts.slice(0, outSegs.length));
+    if (selRet) placeAddedStops(drafts.slice(drafts.length - retSegs.length));
+
     // 5. Weather first (it informs stop choice), then candidate stops
     const weatherFor = async (d: Draft): Promise<WeatherObservation[]> => {
       const pts = d.line ? samplePoints(d.line, 3) : [d.endResolved.location];
@@ -290,13 +322,16 @@ export class TripPlanner {
         }
       }
       const prelimReview = reviewDay({ date: d.day.date, observations: weather[i], hasOutdoorStops: true, drivingHours: d.day.drivingSeconds / 3600 });
+      const added = addedStops.get(d.day.day) ?? [];
       return {
         day: d.day.day,
         date: d.day.date,
         from: d.day.startPlace,
         to: d.day.endPlace,
         drivingHours: d.day.drivingSeconds / 3600,
-        budget: d.line ? stopBudget(d.day.drivingSeconds, req.preferences.pace) : stopBudget(0, req.preferences.pace),
+        // The traveller's own stops take time from the day's budget.
+        budget: Math.max(0, stopBudget(d.line ? d.day.drivingSeconds : 0, req.preferences.pace) - added.length),
+        via: added.map((s) => s.name),
         weatherHeadline: prelimReview.rating === 'unknown' ? undefined : prelimReview.headline,
         candidates: rankCandidates(cands, d.line),
       };
@@ -314,7 +349,7 @@ export class TripPlanner {
       const input = dayInputs[i];
       const choice = choices.get(d.day.day);
       const chosen = (choice?.ids ?? []).map((id) => input.candidates.find((c) => c.place.id === id)!).filter(Boolean);
-      let stops: Stop[] = chosen.map((c) => toStop(c, !d.line));
+      let stops: Stop[] = [...(addedStops.get(d.day.day) ?? []), ...chosen.map((c) => toStop(c, !d.line))];
       if (!d.line) {
         // Free day: order stops by a simple nearest-neighbour walk from the destination centre.
         stops = stops.map((s, k) => ({ ...s, routeFraction: Math.min(1, (k + 1) / (stops.length + 1)) }));
@@ -341,7 +376,7 @@ export class TripPlanner {
 
     // 7. Parking for the selected route, from the actual stops
     if (req.preferences.includeParking) {
-      const attractionStops = days.flatMap((d) => d.stops.filter((s) => s.kind === 'attraction'));
+      const attractionStops = days.flatMap((d) => d.stops.filter((s) => s.kind === 'attraction' || s.kind === 'waypoint'));
       const urbanDays = drafts.filter((d) => d.endResolved.urban).length;
       const park = parkingLine({ urbanStops: Math.min(urbanDays, attractionStops.length), otherStops: Math.max(0, attractionStops.length - urbanDays), overnights: nights, currency: req.currency });
       const lines = [...(legLinesByKind.get(selected.kind) ?? []), park];

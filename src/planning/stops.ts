@@ -85,6 +85,8 @@ export interface DayChoiceInput {
   to: string;
   drivingHours: number;
   budget: number;
+  /** Stops the traveller added that this day passes through. */
+  via?: string[];
   weatherHeadline?: string;
   candidates: RankedCandidate[];
 }
@@ -104,7 +106,7 @@ const SYSTEM = `You arrange road-trip days for a planning app. Rules:
 - Respect each day's stop budget (maximum number of stops). Fewer is fine.
 - Prefer variety (not several near-identical stops) and the traveller's interests.
 - Prefer stops that are open and suit the weather headline when one is given.
-- Narrative: 1–2 plain sentences per day. Mention only the chosen stops and the start/end places given.
+- Narrative: 1–2 plain sentences per day. Mention only the chosen stops, the "via" places and the start/end places given.
   Do not state prices, distances, times, opening hours, or safety claims; the app shows those from data.
 - Reply with JSON only, matching: {"days":[{"day":1,"stopIds":["..."],"narrative":"..."}]}`;
 
@@ -117,9 +119,10 @@ export async function chooseStops(
   for (const d of days) {
     const ids = d.candidates.slice(0, d.budget).map((c) => c.place.id);
     const names = d.candidates.slice(0, d.budget).map((c) => c.place.name);
+    const via = d.via?.length ? ` via ${d.via.join(' and ')}` : '';
     const narrative =
       d.drivingHours > 0
-        ? `Drive from ${d.from} to ${d.to}${names.length ? `, with stops at ${names.join(', ')}` : ''}.`
+        ? `Drive from ${d.from} to ${d.to}${via}${names.length ? `, with stops at ${names.join(', ')}` : ''}.`
         : `A day around ${d.to}${names.length ? `: ${names.join(', ')}` : ' to explore at your own pace'}.`;
     fallback.set(d.day, { ids, narrative, byModel: false });
   }
@@ -138,6 +141,7 @@ export async function chooseStops(
       to: d.to,
       drivingHours: Math.round(d.drivingHours * 10) / 10,
       stopBudget: d.budget,
+      via: d.via,
       weather: d.weatherHeadline,
       candidates: d.candidates.slice(0, 10).map((c) => ({
         id: c.place.id,

@@ -81,6 +81,7 @@ export const DEFAULT_VISIT_MINUTES: Record<Stop['kind'], number> = {
   rest: 20,
   overnight: 0,
   fuel: 15,
+  waypoint: 60,
 };
 
 /** Rest breaks: one 15-minute break every 2 hours of driving. */

@@ -162,7 +162,8 @@ export type OpeningPeriod = z.infer<typeof OpeningPeriod>;
 export const Stop = z.object({
   id: z.string(),
   name: z.string(),
-  kind: z.enum(['attraction', 'meal', 'rest', 'overnight', 'fuel']),
+  /** waypoint = a stop the traveller added in the trip form. */
+  kind: z.enum(['attraction', 'meal', 'rest', 'overnight', 'fuel', 'waypoint']),
   location: LatLng,
   placeId: z.string().optional(),
   description: z.string().optional(),

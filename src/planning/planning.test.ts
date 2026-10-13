@@ -219,6 +219,27 @@ describe('TripPlanner (sample mode)', () => {
     expect(plan.issues.map((i) => i.code)).toContain('BORDER_CROSSING');
     expect(plan.advisories[0].country).toBe('United States');
   });
+
+  it('puts stops the traveller added on the driving days that pass them, on both legs', async () => {
+    const viaMontreal = TripRequest.parse({
+      ...req,
+      origin: { address: 'Toronto, ON' },
+      destination: { address: 'Quebec City, QC' },
+      waypoints: [{ address: 'Montreal, QC' }],
+      startDate: '2026-10-14',
+      endDate: '2026-10-18',
+    });
+    const plan = await new TripPlanner(providers(), { usdToCad: 1.38 }).generate(viaMontreal);
+    const added = plan.days.flatMap((d) => d.stops.filter((s) => s.kind === 'waypoint').map((s) => ({ day: d, stop: s })));
+    expect(added).toHaveLength(2); // outbound and return
+    for (const { day, stop } of added) {
+      expect(stop.name).toBe('Montreal, QC');
+      expect(day.drivingSeconds).toBeGreaterThan(0);
+      expect(stop.arrivalTime).toBeDefined();
+      expect(day.narrative).toMatch(/via Montreal, QC/);
+    }
+    expect(added[0].day.day).toBeLessThan(added[1].day.day);
+  });
 });
 
 describe('localIso', () => {
