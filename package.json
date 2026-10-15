@@ -1,5 +1,5 @@
 {
-  "name": "roadtrip-planner-api",
+  "name": "travlio-api",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -42,7 +42,7 @@
     "vitest": "^5.0.4"
   },
   "type": "module",
-  "description": "Road Trip Planner backend API (NestJS)",
+  "description": "Travlio backend API (NestJS)",
   "engines": {
     "node": ">=22"
   }

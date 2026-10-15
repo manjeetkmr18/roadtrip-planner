@@ -38,7 +38,7 @@ export const EnvSchema = z.object({
   OILPRICEAPI_KEY: optional,
   EIA_API_KEY: optional,
   /** api.weather.gov requires an identifying User-Agent with contact details. */
-  NWS_USER_AGENT: z.string().default('roadtrip-planner (dev@example.com)'),
+  NWS_USER_AGENT: z.string().default('travlio (dev@example.com)'),
 
   /** Used only to convert USD tolls/fuel into CAD; shown as approximate. */
   USD_CAD_RATE: z.coerce.number().positive().default(1.38),

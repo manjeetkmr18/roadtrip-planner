@@ -1,4 +1,4 @@
-# Road Trip Planner — Backend API
+# Travlio — Backend API
 
 NestJS API that plans Canada / cross-border road trips: routes, an itemised **low / typical / high** trip cost (tolls, the 407 ETR, fuel or charging, parking), a weather review for every driving day, realistic driving days, and stops checked against opening hours.
 
