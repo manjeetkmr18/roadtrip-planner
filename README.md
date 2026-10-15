@@ -81,8 +81,25 @@ Weather (Environment Canada, NWS) and travel advisories (Global Affairs Canada) 
 
 ### Things to verify with your accounts
 
-- **Google pricing:** the cost meter in `src/providers/infra.ts` assumes Routes with tolls at $15/1k and Places Text Search (Enterprise fields) at $35/1k. Confirm in your billing console.
+- **Google pricing:** the cost meter in `src/providers/infra.ts` uses list prices: Compute Routes Enterprise (toll prices) $15/1k, Essentials $5/1k, Places Text Search Enterprise (rating + opening hours) $35/1k. It ignores free monthly allowances and volume discounts, so it reads high. Confirm in your billing console.
 - **407 ETR rates:** stored in `src/core/etr407.ts`. Update them every January.
+
+## Running costs per trip plan
+
+What one typical plan (3-day round trip, one added stop, tolls on the way) asks for:
+
+| Call | SKU | Per plan |
+|---|---|---|
+| Find places | Geocoding | ~3 |
+| Main routes, with toll prices (out + back) | Compute Routes **Enterprise** | 2 |
+| Toll-free option (out + back) | Compute Routes Essentials (Enterprise if it crosses a border, for bridge tolls) | 0–2 |
+| Stops along each day | Places Text Search **Enterprise** | 1 per day (`PLACES_SEARCHES_PER_DAY`) |
+| Choose stops + write day descriptions | Bedrock, `BEDROCK_FAST_MODEL_ID` if set | 1 call, ~2k tokens in, ~250 out |
+
+How it is kept down:
+- Toll prices are only asked for on routes where they can change the cost; the toll-free option is a plain route.
+- One Places search per day; the traveller's interests take turns across days. Each search asks for 20 results (billed per request, not per result), and repeated searches in one plan are reused.
+- The model sees the top 8 candidates per day, and stop choice runs on the fast model when `BEDROCK_FAST_MODEL_ID` is set.
 
 ## Endpoints
 

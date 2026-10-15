@@ -66,6 +66,24 @@ describe('Google Routes adapter', () => {
   });
 });
 
+describe('Google Routes adapter: plain routes', () => {
+  it('skips toll pricing (Essentials SKU) when toll prices are not needed', async () => {
+    let sent: { body: Record<string, unknown>; mask: string } | undefined;
+    stubFetch({ routes: [{ distanceMeters: 1000, duration: '60s', polyline: { encodedPolyline: '' }, legs: [] }] }, (_url, init) => {
+      sent = { body: JSON.parse(String(init.body)), mask: new Headers(init.headers).get('X-Goog-FieldMask') ?? '' };
+    });
+    const ctx = new ProviderContext();
+    await new RoutesProvider('k').compute(
+      { origin: { lat: 43.6, lng: -79.6 }, destination: { lat: 45.4, lng: -75.7 }, waypoints: [], departureIso: '2099-01-01T08:00:00-05:00', avoidTolls: true, alternatives: false, tollPasses: ['CA_ON_407_ETR'], fuelType: 'gasoline', tollPrices: false },
+      ctx,
+    );
+    expect(sent!.body.extraComputations).toBeUndefined();
+    expect(sent!.mask).not.toContain('tollInfo');
+    expect(JSON.stringify(sent!.body.routeModifiers)).not.toContain('tollPasses');
+    expect(ctx.calls).toEqual({ routesEssentials: 1 });
+  });
+});
+
 describe('Google Places adapter', () => {
   it('converts opening periods, including 24-hour and past-midnight places', () => {
     expect(toOpeningPeriods([{ open: { day: 0, hour: 0, minute: 0 } }])).toHaveLength(7);

@@ -52,7 +52,7 @@ export async function fetchJson<T>(
 export const PRICING_USD = {
   geocoding: 5 / 1000,
   routesEssentials: 5 / 1000,
-  /** Toll calculation is billed at a higher SKU; assumed Enterprise. Verify in your billing console. */
+  /** Toll calculation puts a request in Compute Routes Enterprise (Google SKU details). */
   routesWithTolls: 15 / 1000,
   /** Text Search with opening hours + rating fields is billed as Enterprise. Verify. */
   placesTextSearchEnterprise: 35 / 1000,
@@ -60,10 +60,17 @@ export const PRICING_USD = {
 } as const;
 
 /** Per-token model prices, read lazily so .env is loaded first. Defaults match Claude Sonnet-class pricing. */
-const llmPrice = () => ({
-  input: Number(process.env.LLM_INPUT_USD_PER_MTOK ?? 2) / 1_000_000,
-  output: Number(process.env.LLM_OUTPUT_USD_PER_MTOK ?? 10) / 1_000_000,
-});
+const llmPrice = (fast = false) =>
+  fast
+    ? {
+        // Defaults match Claude Haiku-class pricing.
+        input: Number(process.env.LLM_FAST_INPUT_USD_PER_MTOK ?? 0.1) / 1_000_000,
+        output: Number(process.env.LLM_FAST_OUTPUT_USD_PER_MTOK ?? 0.5) / 1_000_000,
+      }
+    : {
+        input: Number(process.env.LLM_INPUT_USD_PER_MTOK ?? 2) / 1_000_000,
+        output: Number(process.env.LLM_OUTPUT_USD_PER_MTOK ?? 10) / 1_000_000,
+      };
 
 export type MeterKey = keyof typeof PRICING_USD;
 
@@ -78,10 +85,10 @@ export class ProviderContext {
     this.usd += PRICING_USD[key] * count;
   }
 
-  recordTokens(input: number, output: number) {
+  recordTokens(input: number, output: number, fast = false) {
     this.calls.llmInputTokens = (this.calls.llmInputTokens ?? 0) + input;
     this.calls.llmOutputTokens = (this.calls.llmOutputTokens ?? 0) + output;
-    const p = llmPrice();
+    const p = llmPrice(fast);
     this.usd += input * p.input + output * p.output;
   }
 

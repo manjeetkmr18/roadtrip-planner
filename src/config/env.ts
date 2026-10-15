@@ -42,6 +42,8 @@ export const EnvSchema = z.object({
 
   /** Used only to convert USD tolls/fuel into CAD; shown as approximate. */
   USD_CAD_RATE: z.coerce.number().positive().default(1.38),
+  /** Google Places searches per trip day (1 = interests take turns across days). */
+  PLACES_SEARCHES_PER_DAY: z.coerce.number().int().min(1).max(4).default(1),
   FREE_TRIPS_PER_MONTH: z.coerce.number().int().min(0).default(3),
 });
 

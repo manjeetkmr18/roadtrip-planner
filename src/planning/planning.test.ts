@@ -183,6 +183,63 @@ describe('stops', () => {
   });
 });
 
+/** Wraps the sample providers and records what the planner asks Google for. */
+function spying() {
+  const routeQueries: { avoidTolls: boolean; tollPrices?: boolean }[] = [];
+  const placeQueries: string[] = [];
+  class SpyRoutes extends RoutesProvider {
+    override async compute(q: Parameters<RoutesProvider['compute']>[0], ctx: ProviderContext) {
+      routeQueries.push({ avoidTolls: q.avoidTolls, tollPrices: q.tollPrices });
+      return super.compute(q, ctx);
+    }
+  }
+  class SpyPlaces extends PlacesProvider {
+    override async alongRoute(query: string, polyline: string, max: number, ctx: ProviderContext) {
+      placeQueries.push(query);
+      expect(max).toBe(20);
+      return super.alongRoute(query, polyline, max, ctx);
+    }
+    override async near(query: string, center: { lat: number; lng: number }, r: number, max: number, ctx: ProviderContext) {
+      placeQueries.push(query);
+      return super.near(query, center, r, max, ctx);
+    }
+  }
+  return { routeQueries, placeQueries, p: providers({ routes: new SpyRoutes(), places: new SpyPlaces() }) };
+}
+
+describe('TripPlanner: Google calls per plan (cost)', () => {
+  it('makes one Places search per day, taking turns between interests', async () => {
+    const s = spying();
+    const two = TripRequest.parse({ ...req, preferences: { interests: ['food discovery', 'history'] } });
+    await new TripPlanner(s.p, { usdToCad: 1.38 }).generate(two);
+    expect(s.placeQueries).toEqual(['famous local restaurant', 'historic site', 'famous local restaurant']);
+  });
+
+  it('can still make one search per interest per day when configured', async () => {
+    const s = spying();
+    const two = TripRequest.parse({ ...req, preferences: { interests: ['food discovery', 'history'] } });
+    await new TripPlanner(s.p, { usdToCad: 1.38, placesSearchesPerDay: 2 }).generate(two);
+    expect(s.placeQueries).toHaveLength(6);
+  });
+
+  it('prices tolls only on the main route requests, not the toll-free ones', async () => {
+    const s = spying();
+    await new TripPlanner(s.p, { usdToCad: 1.38 }).generate(req);
+    const priced = s.routeQueries.filter((q) => q.tollPrices !== false);
+    const plain = s.routeQueries.filter((q) => q.tollPrices === false);
+    expect(priced.every((q) => !q.avoidTolls)).toBe(true);
+    expect(plain.length).toBeGreaterThan(0);
+    expect(plain.every((q) => q.avoidTolls)).toBe(true);
+  });
+
+  it('keeps toll prices on toll-free routes that cross a border (bridge tolls)', async () => {
+    const s = spying();
+    const us = TripRequest.parse({ ...req, destination: { address: 'Chicago, IL' }, preferences: { avoidTolls: true } });
+    await new TripPlanner(s.p, { usdToCad: 1.38 }).generate(us);
+    expect(s.routeQueries.filter((q) => q.avoidTolls).every((q) => q.tollPrices === true)).toBe(true);
+  });
+});
+
 describe('TripPlanner (sample mode)', () => {
   it('builds a full round-trip plan with costs, days, weather reviews and checks', async () => {
     const plan = await new TripPlanner(providers(), { usdToCad: 1.38 }).generate(req);

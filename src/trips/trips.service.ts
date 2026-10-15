@@ -28,7 +28,7 @@ export class TripsService {
     private readonly queue: GenerationQueue,
     providers: Providers,
   ) {
-    this.planner = new TripPlanner(providers, { usdToCad: env.USD_CAD_RATE });
+    this.planner = new TripPlanner(providers, { usdToCad: env.USD_CAD_RATE, placesSearchesPerDay: env.PLACES_SEARCHES_PER_DAY });
   }
 
   private defaultTitle(r: TripRequest) {

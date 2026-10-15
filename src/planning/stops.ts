@@ -101,6 +101,9 @@ const LlmChoice = z.object({
   ),
 });
 
+/** Candidates sent to the model per day. Days have at most a few stops, so the top 8 are plenty. */
+const LLM_CANDIDATES_PER_DAY = 8;
+
 const SYSTEM = `You arrange road-trip days for a planning app. Rules:
 - Choose stops ONLY from the candidate list given for that day, by id. Never invent places.
 - Respect each day's stop budget (maximum number of stops). Fewer is fine.
@@ -145,7 +148,7 @@ export async function chooseStops(
       stopBudget: d.budget,
       via: d.via,
       weather: d.weatherHeadline,
-      candidates: d.candidates.slice(0, 10).map((c) => ({
+      candidates: d.candidates.slice(0, LLM_CANDIDATES_PER_DAY).map((c) => ({
         id: c.place.id,
         name: c.place.name,
         types: c.place.types.slice(0, 3),
@@ -159,7 +162,7 @@ export async function chooseStops(
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const text = await ctx.llm.complete({ system: SYSTEM, prompt: JSON.stringify(payload), maxTokens: 1500 }, ctx.provider);
+      const text = await ctx.llm.complete({ system: SYSTEM, prompt: JSON.stringify(payload), maxTokens: 1500, fast: true }, ctx.provider);
       const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
       const parsed = LlmChoice.parse(JSON.parse(json));
       const out = new Map(fallback);

@@ -37,7 +37,7 @@ export class BedrockLlm implements Llm {
         inferenceConfig: { maxTokens: args.maxTokens, temperature: 0.3 },
       }),
     );
-    ctx.recordTokens(res.usage?.inputTokens ?? 0, res.usage?.outputTokens ?? 0);
+    ctx.recordTokens(res.usage?.inputTokens ?? 0, res.usage?.outputTokens ?? 0, modelId === this.fastModelId);
     const text = (res.output?.message?.content ?? []).map((c) => ('text' in c ? c.text : '')).join('');
     if (!text) throw new Error(`Bedrock returned no text (stopReason ${res.stopReason})`);
     return text;

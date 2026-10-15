@@ -97,7 +97,15 @@ interface LegRoutes {
 
 export interface PlannerOptions {
   usdToCad: number;
+  /**
+   * Google Places searches per trip day (each is a billed Text Search Enterprise call).
+   * With 1, the traveller's interests take turns across the days. Default 1.
+   */
+  placesSearchesPerDay?: number;
 }
+
+/** Results asked for per Places search. Google bills per request, not per result, so ask for the maximum. */
+const PLACES_RESULTS_PER_SEARCH = 20;
 
 export class TripPlanner {
   constructor(
@@ -120,7 +128,10 @@ export class TripPlanner {
     const tolled = (r: RawRoute) => r.toll != null || r.steps.some((s) => s.roads.includes('407') || /\b407\b|toll/i.test(s.instruction ?? ''));
     let avoidTolls: RawRoute | undefined;
     if (tolled(fastest) || req.preferences.avoidTolls) {
-      [avoidTolls] = await this.providers.routes.compute({ ...base, avoidTolls: true, alternatives: false }, ctx);
+      // The toll-free option normally has no tolls to price, so ask for a plain (Essentials) route.
+      // Border crossings are the exception: the bridges and tunnels charge tolls that can't be avoided.
+      const crossesBorder = [to, ...via].some((p) => p.country && from.country && p.country !== from.country);
+      [avoidTolls] = await this.providers.routes.compute({ ...base, avoidTolls: true, alternatives: false, tollPrices: crossesBorder }, ctx);
     }
     return { fastest, alternative, avoidTolls };
   }
@@ -308,14 +319,25 @@ export class TripPlanner {
     };
     const weather = await mapLimit(drafts, 3, (d) => weatherFor(d).catch(() => [] as WeatherObservation[]));
 
-    const queries = interestQueries(req.preferences.interests);
+    // Interests take turns across the days, so a 3-day trip with two interests still covers both
+    // while making one Places search per day instead of one per interest per day.
+    const pool = interestQueries(req.preferences.interests, 4);
+    const perDay = Math.max(1, Math.min(pool.length, this.opts.placesSearchesPerDay ?? 1));
+    const searched = new Map<string, Promise<CandidatePlace[]>>();
+    const searchOnce = (key: string, run: () => Promise<CandidatePlace[]>) => {
+      if (!searched.has(key)) searched.set(key, run());
+      return searched.get(key)!;
+    };
     const dayInputs: DayChoiceInput[] = await mapLimit(drafts, 3, async (d, i) => {
       const cands: CandidatePlace[] = [];
+      const queries = Array.from({ length: perDay }, (_, k) => pool[(i * perDay + k) % pool.length]);
       for (const q of queries) {
         try {
           const found = d.line
-            ? await p.places.alongRoute(q, encodePolyline(d.line), 10, ctx)
-            : await p.places.near(q, d.endResolved.location, 25_000, 10, ctx);
+            ? await searchOnce(`route|${q}|${d.day.day}`, () => p.places.alongRoute(q, encodePolyline(d.line!), PLACES_RESULTS_PER_SEARCH, ctx))
+            : await searchOnce(`near|${q}|${d.endResolved.location.lat.toFixed(2)},${d.endResolved.location.lng.toFixed(2)}`, () =>
+                p.places.near(q, d.endResolved.location, 25_000, PLACES_RESULTS_PER_SEARCH, ctx),
+              );
           cands.push(...found);
         } catch (e) {
           ctx.note(`Place search failed for day ${d.day.day}: ${(e as Error).message.slice(0, 100)}`);

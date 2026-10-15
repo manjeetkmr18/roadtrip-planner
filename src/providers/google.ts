@@ -112,6 +112,12 @@ export interface RouteQuery {
   departureIso: string;
   avoidTolls: boolean;
   alternatives: boolean;
+  /**
+   * Ask Google for toll prices. This puts the request in the Compute Routes Enterprise SKU
+   * (3x the Essentials price), so only ask when the answer can change the cost shown.
+   * Defaults to true.
+   */
+  tollPrices?: boolean;
   tollPasses: string[];
   fuelType: FuelType;
 }
@@ -147,6 +153,7 @@ export class RoutesProvider {
   async compute(q: RouteQuery, ctx: ProviderContext): Promise<RawRoute[]> {
     if (!this.key) return [this.sampleRoute(q, ctx)];
     const wp = (p: LatLng) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
+    const tolls = q.tollPrices !== false;
     const body = {
       origin: wp(q.origin),
       destination: wp(q.destination),
@@ -155,11 +162,12 @@ export class RoutesProvider {
       routingPreference: 'TRAFFIC_UNAWARE',
       departureTime: Date.parse(q.departureIso) > Date.now() ? q.departureIso : undefined,
       computeAlternativeRoutes: q.alternatives && q.waypoints.length === 0,
-      extraComputations: ['TOLLS'],
+      extraComputations: tolls ? ['TOLLS'] : undefined,
       routeModifiers: {
         avoidTolls: q.avoidTolls,
-        vehicleInfo: { emissionType: EMISSION[q.fuelType] },
-        tollPasses: q.tollPasses.length ? q.tollPasses : undefined,
+        // Vehicle type and passes only affect toll prices.
+        vehicleInfo: tolls ? { emissionType: EMISSION[q.fuelType] } : undefined,
+        tollPasses: tolls && q.tollPasses.length ? q.tollPasses : undefined,
       },
       languageCode: 'en-CA',
       units: 'METRIC',
@@ -169,7 +177,7 @@ export class RoutesProvider {
       'routes.duration',
       'routes.description',
       'routes.polyline.encodedPolyline',
-      'routes.travelAdvisory.tollInfo',
+      ...(tolls ? ['routes.travelAdvisory.tollInfo'] : []),
       'routes.legs.steps.distanceMeters',
       'routes.legs.steps.staticDuration',
       'routes.legs.steps.polyline.encodedPolyline',
@@ -183,7 +191,7 @@ export class RoutesProvider {
       body: JSON.stringify(body),
       timeoutMs: 25_000,
     });
-    ctx.record('routesWithTolls');
+    ctx.record(tolls ? 'routesWithTolls' : 'routesEssentials');
     return (res.routes ?? []).map((r) => {
       const tollInfo = r.travelAdvisory?.tollInfo;
       const prices = (tollInfo?.estimatedPrice ?? []).map((p) => ({
