@@ -229,3 +229,13 @@ describe('TripRequest schema', () => {
     expect(() => TripRequest.parse({ ...r, endDate: '2026-10-01' })).toThrow();
   });
 });
+
+describe('sun times', () => {
+  it('matches published Toronto times on the June solstice and handles polar night', async () => {
+    const { sunTimesLocal } = await import('./sun.js');
+    const t = sunTimesLocal('2026-06-21', 43.65, -79.38, 'America/Toronto')!;
+    expect(t.sunrise).toMatch(/^05:3[4-8]$/);
+    expect(t.sunset).toMatch(/^21:0[0-5]$/);
+    expect(sunTimesLocal('2026-12-21', 78.2, 15.6, 'Arctic/Longyearbyen')).toBeNull();
+  });
+});

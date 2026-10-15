@@ -295,3 +295,36 @@ describe('localIso', () => {
     expect(localIso('2026-01-15', '08:00', 'America/Regina')).toBe('2026-01-15T08:00:00-06:00');
   });
 });
+
+describe('Mockup features: days, creator mode, detours, ferries', () => {
+  it('gives every day a title and sunrise/sunset, and creator tips only in creator mode', async () => {
+    const plain = await new TripPlanner(providers(), { usdToCad: 1.38 }).generate(req);
+    expect(plain.days.every((d) => d.title && /^\d\d:\d\d$/.test(d.sunset ?? ''))).toBe(true);
+    expect(plain.days[0].title).toBe('On to Ottawa');
+    expect(plain.days.some((d) => d.creatorTip)).toBe(false);
+    const creator = TripRequest.parse({ ...req, preferences: { creatorMode: true } });
+    const plan = await new TripPlanner(providers(), { usdToCad: 1.38 }).generate(creator);
+    expect(plan.days.every((d) => d.creatorTip?.includes('Park before filming.'))).toBe(true);
+    expect(plan.days[0].creatorTip).toContain(`Sunset ${plan.days[0].sunset}`);
+  });
+
+  it('passes "avoid ferries" to the route request', async () => {
+    const seen: (boolean | undefined)[] = [];
+    class R extends RoutesProvider {
+      override async compute(q: Parameters<RoutesProvider['compute']>[0], ctx: ProviderContext) {
+        seen.push(q.avoidFerries);
+        return super.compute(q, ctx);
+      }
+    }
+    await new TripPlanner(providers({ routes: new R() }), { usdToCad: 1.38 }).generate(TripRequest.parse({ ...req, preferences: { avoidFerries: true } }));
+    expect(seen.every((x) => x === true)).toBe(true);
+  });
+
+  it('drops stops beyond the maximum detour', () => {
+    const line = [{ lat: 44, lng: -79 }, { lat: 44, lng: -78 }];
+    const near = { id: 'a', name: 'Near', location: { lat: 44.01, lng: -78.5 }, rating: 4.5, ratingCount: 900, types: [], query: 'museum', sample: false };
+    const far = { ...near, id: 'b', name: 'Far', location: { lat: 44.3, lng: -78.5 } };
+    expect(rankCandidates([near, far], line, 90).map((r) => r.place.id)).toEqual(['a', 'b']);
+    expect(rankCandidates([near, far], line, 20).map((r) => r.place.id)).toEqual(['a']);
+  });
+});

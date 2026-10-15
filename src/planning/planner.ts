@@ -1,4 +1,5 @@
 import {
+  sunTimesLocal,
   addDays,
   daysBetween,
   decodePolyline,
@@ -106,6 +107,16 @@ export interface PlannerOptions {
 /** Results asked for per Places search. Google bills per request, not per result, so ask for the maximum. */
 const PLACES_RESULTS_PER_SEARCH = 20;
 
+/** Creator-mode tip when the model is off: sunset time plus the best photo stop of the day. */
+function templateCreatorTip(endPlace: string, sunset: string | undefined, stops: Stop[]): string {
+  const town = endPlace.replace(/^near /, '').split(',')[0];
+  const photo = stops.find((s) => s.tags?.some((t) => ['Viewpoint', 'Nature', 'Beach', 'Hiking'].includes(t)));
+  const parts = [sunset ? `Sunset ${sunset} at ${town}.` : `Golden hour near ${town}.`];
+  if (photo) parts.push(`${photo.name} is the best photo stop today.`);
+  parts.push('Park before filming.');
+  return parts.join(' ');
+}
+
 export class TripPlanner {
   constructor(
     private readonly providers: Providers,
@@ -120,6 +131,7 @@ export class TripPlanner {
       departureIso,
       tollPasses: req.vehicle.tollPasses,
       fuelType: req.vehicle.fuelType,
+      avoidFerries: req.preferences.avoidFerries,
     };
     const routes = await this.providers.routes.compute({ ...base, alternatives: true }, ctx);
     if (!routes.length) throw new Error(`No driving route found from ${from.label} to ${to.label}`);
@@ -307,9 +319,17 @@ export class TripPlanner {
     };
     const weather = await mapLimit(drafts, 3, (d) => weatherFor(d).catch(() => [] as WeatherObservation[]));
 
+    // Sunrise and sunset at each day's end place, in that place's time zone.
+    const sun = drafts.map((d) => {
+      const at = d.day.endLocation ?? d.endResolved.location;
+      return sunTimesLocal(d.day.date, at.lat, at.lng, timeZoneFor(d.endResolved));
+    });
+
     // Interests take turns across the days, so a 3-day trip with two interests still covers both
     // while making one Places search per day instead of one per interest per day.
-    const pool = interestQueries(req.preferences.interests, 4);
+    // Creator mode makes sure viewpoints are among the searches.
+    const interests = req.preferences.creatorMode ? [...req.preferences.interests, 'photography'] : req.preferences.interests;
+    const pool = interestQueries(interests, 4);
     const perDay = Math.max(1, Math.min(pool.length, this.opts.placesSearchesPerDay ?? 1));
     const searched = new Map<string, Promise<CandidatePlace[]>>();
     const searchOnce = (key: string, run: () => Promise<CandidatePlace[]>) => {
@@ -343,7 +363,8 @@ export class TripPlanner {
         budget: Math.max(0, stopBudget(d.line ? d.day.drivingSeconds : 0, req.preferences.pace) - added.length),
         via: added.map((s) => s.name),
         weatherHeadline: prelimReview.rating === 'unknown' ? undefined : prelimReview.headline,
-        candidates: rankCandidates(cands, d.line),
+        sunset: sun[i]?.sunset,
+        candidates: rankCandidates(cands, d.line, req.preferences.maxDetourMinutes),
       };
     });
     // A place should appear on only one day.
@@ -354,7 +375,13 @@ export class TripPlanner {
     }
 
     // 6. AI arranges stops from the candidates; code schedules and checks them
-    const choices = await chooseStops(dayInputs, { interests: req.preferences.interests, pace: req.preferences.pace, llm: p.llm, provider: ctx });
+    const choices = await chooseStops(dayInputs, {
+      interests: req.preferences.interests,
+      pace: req.preferences.pace,
+      llm: p.llm,
+      provider: ctx,
+      creatorMode: req.preferences.creatorMode,
+    });
     const days: DayPlan[] = drafts.map((d, i) => {
       const input = dayInputs[i];
       const choice = choices.get(d.day.day);
@@ -374,7 +401,15 @@ export class TripPlanner {
           description: 'Suggested overnight area (not a booking).',
         });
       }
-      const day: DayPlan = { ...d.day, stops, narrative: choice?.narrative };
+      const day: DayPlan = {
+        ...d.day,
+        stops,
+        narrative: choice?.narrative,
+        title: choice?.title,
+        sunrise: sun[i]?.sunrise,
+        sunset: sun[i]?.sunset,
+        creatorTip: req.preferences.creatorMode ? (choice?.creatorTip ?? templateCreatorTip(d.day.endPlace, sun[i]?.sunset, stops)) : undefined,
+      };
       const scheduled = scheduleDay(day);
       const hasOutdoor = scheduled.stops.some((s) => /park|trail|beach|viewpoint|natural|campground/i.test(`${s.description ?? ''} ${s.name}`));
       return {

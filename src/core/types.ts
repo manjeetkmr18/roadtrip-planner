@@ -54,6 +54,11 @@ export const PreferencesInput = z.object({
   interests: z.array(z.string()).default(['nature', 'famous attractions']),
   /** Paid parking budget assumption per stop, in trip currency. */
   includeParking: z.boolean().default(true),
+  /** Longest detour (there and back) the planner will suggest for a stop. */
+  maxDetourMinutes: z.number().min(0).max(180).default(45),
+  avoidFerries: z.boolean().default(false),
+  /** Adds sunrise/sunset windows, viewpoints and a filming tip to each day. */
+  creatorMode: z.boolean().default(false),
 });
 export type PreferencesInput = z.infer<typeof PreferencesInput>;
 
@@ -79,6 +84,9 @@ export const TripRequest = z
       maxDrivingHoursPerDay: 6,
       interests: ['nature', 'famous attractions'],
       includeParking: true,
+      maxDetourMinutes: 45,
+      avoidFerries: false,
+      creatorMode: false,
     }),
   })
   .refine((t) => t.endDate >= t.startDate, { message: 'endDate must be on or after startDate', path: ['endDate'] });
@@ -175,6 +183,8 @@ export const Stop = z.object({
   routeFraction: z.number().min(0).max(1).optional(),
   detourMinutes: z.number().optional(),
   mapsUrl: z.string().optional(),
+  /** Short labels such as the interest the stop matched ("Nature") or "Fuel stop". */
+  tags: z.array(z.string()).optional(),
   source: SourceRef.optional(),
 });
 export type Stop = z.infer<typeof Stop>;
@@ -239,6 +249,13 @@ export const DayPlan = z.object({
   departureTime: hhmm,
   stops: z.array(Stop),
   narrative: z.string().optional(),
+  /** A short name for the day, e.g. "Lake Superior shore". */
+  title: z.string().optional(),
+  /** Local times at the day's end place. */
+  sunrise: hhmm.optional(),
+  sunset: hhmm.optional(),
+  /** Creator mode: a filming / photo tip for the day. */
+  creatorTip: z.string().optional(),
   weather: DayWeatherReview.optional(),
 });
 export type DayPlan = z.infer<typeof DayPlan>;

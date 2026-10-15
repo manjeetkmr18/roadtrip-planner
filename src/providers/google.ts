@@ -111,6 +111,7 @@ export interface RouteQuery {
   waypoints: LatLng[];
   departureIso: string;
   alternatives: boolean;
+  avoidFerries?: boolean;
   tollPasses: string[];
   fuelType: FuelType;
 }
@@ -156,6 +157,7 @@ export class RoutesProvider {
       computeAlternativeRoutes: q.alternatives && q.waypoints.length === 0,
       extraComputations: ['TOLLS'],
       routeModifiers: {
+        avoidFerries: q.avoidFerries || undefined,
         vehicleInfo: { emissionType: EMISSION[q.fuelType] },
         tollPasses: q.tollPasses.length ? q.tollPasses : undefined,
       },
