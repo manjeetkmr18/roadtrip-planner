@@ -54,7 +54,7 @@ src/
 ## How a plan is made
 
 1. **Find the places.** Geocode the origin, destination and any stops (Google).
-2. **Get the routes.** Fastest, alternative and avoid-tolls routes, with toll info (Google Routes). Round trips also get a return leg.
+2. **Get the routes.** The fastest route and an alternative, with toll prices (Google Routes). Round trips also get a return leg.
 3. **Cost each route.**
    - The **407 ETR** uses our own calculator from the published 2026 rates, since Google can't price it.
    - Other tolls come from Google.
@@ -91,13 +91,12 @@ What one typical plan (3-day round trip, one added stop, tolls on the way) asks 
 | Call | SKU | Per plan |
 |---|---|---|
 | Find places | Geocoding | ~3 |
-| Main routes, with toll prices (out + back) | Compute Routes **Enterprise** | 2 |
-| Toll-free option (out + back) | Compute Routes Essentials (Enterprise if it crosses a border, for bridge tolls) | 0–2 |
+| Routes with toll prices, main + alternative in one request (out + back) | Compute Routes **Enterprise** | 2 |
 | Stops along each day | Places Text Search **Enterprise** | 1 per day (`PLACES_SEARCHES_PER_DAY`) |
 | Choose stops + write day descriptions | Bedrock, `BEDROCK_FAST_MODEL_ID` if set | 1 call, ~2k tokens in, ~250 out |
 
 How it is kept down:
-- Toll prices are only asked for on routes where they can change the cost; the toll-free option is a plain route.
+- One route request per leg returns both the main route and an alternative. There is no separate toll-free option.
 - One Places search per day; the traveller's interests take turns across days. Each search asks for 20 results (billed per request, not per result), and repeated searches in one plan are reused.
 - The model sees the top 8 candidates per day, and stop choice runs on the fast model when `BEDROCK_FAST_MODEL_ID` is set.
 

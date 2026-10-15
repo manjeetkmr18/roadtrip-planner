@@ -110,14 +110,7 @@ export interface RouteQuery {
   destination: LatLng;
   waypoints: LatLng[];
   departureIso: string;
-  avoidTolls: boolean;
   alternatives: boolean;
-  /**
-   * Ask Google for toll prices. This puts the request in the Compute Routes Enterprise SKU
-   * (3x the Essentials price), so only ask when the answer can change the cost shown.
-   * Defaults to true.
-   */
-  tollPrices?: boolean;
   tollPasses: string[];
   fuelType: FuelType;
 }
@@ -153,7 +146,6 @@ export class RoutesProvider {
   async compute(q: RouteQuery, ctx: ProviderContext): Promise<RawRoute[]> {
     if (!this.key) return [this.sampleRoute(q, ctx)];
     const wp = (p: LatLng) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
-    const tolls = q.tollPrices !== false;
     const body = {
       origin: wp(q.origin),
       destination: wp(q.destination),
@@ -162,12 +154,10 @@ export class RoutesProvider {
       routingPreference: 'TRAFFIC_UNAWARE',
       departureTime: Date.parse(q.departureIso) > Date.now() ? q.departureIso : undefined,
       computeAlternativeRoutes: q.alternatives && q.waypoints.length === 0,
-      extraComputations: tolls ? ['TOLLS'] : undefined,
+      extraComputations: ['TOLLS'],
       routeModifiers: {
-        avoidTolls: q.avoidTolls,
-        // Vehicle type and passes only affect toll prices.
-        vehicleInfo: tolls ? { emissionType: EMISSION[q.fuelType] } : undefined,
-        tollPasses: tolls && q.tollPasses.length ? q.tollPasses : undefined,
+        vehicleInfo: { emissionType: EMISSION[q.fuelType] },
+        tollPasses: q.tollPasses.length ? q.tollPasses : undefined,
       },
       languageCode: 'en-CA',
       units: 'METRIC',
@@ -177,7 +167,7 @@ export class RoutesProvider {
       'routes.duration',
       'routes.description',
       'routes.polyline.encodedPolyline',
-      ...(tolls ? ['routes.travelAdvisory.tollInfo'] : []),
+      'routes.travelAdvisory.tollInfo',
       'routes.legs.steps.distanceMeters',
       'routes.legs.steps.staticDuration',
       'routes.legs.steps.polyline.encodedPolyline',
@@ -191,7 +181,7 @@ export class RoutesProvider {
       body: JSON.stringify(body),
       timeoutMs: 25_000,
     });
-    ctx.record(tolls ? 'routesWithTolls' : 'routesEssentials');
+    ctx.record('routesWithTolls');
     return (res.routes ?? []).map((r) => {
       const tollInfo = r.travelAdvisory?.tollInfo;
       const prices = (tollInfo?.estimatedPrice ?? []).map((p) => ({
@@ -238,7 +228,7 @@ export class RoutesProvider {
       }
     }
     const roadFactor = 1.25;
-    const kmh = q.avoidTolls ? 88 : 95;
+    const kmh = 95;
     const steps: RouteStep[] = [];
     let i = 0;
     while (i < dense.length - 1) {
@@ -250,7 +240,7 @@ export class RoutesProvider {
         chunk.push(dense[++j]);
       }
       const mid = chunk[Math.floor(chunk.length / 2)];
-      const in407 = !q.avoidTolls && mid.lat > 43.55 && mid.lat < 43.95 && mid.lng > ETR407_WEST_END_LNG && mid.lng < ETR407_EAST_END_LNG;
+      const in407 = mid.lat > 43.55 && mid.lat < 43.95 && mid.lng > ETR407_WEST_END_LNG && mid.lng < ETR407_EAST_END_LNG;
       steps.push({
         distanceMeters: Math.round(d),
         durationSeconds: Math.round((d / 1000 / kmh) * 3600),
@@ -268,7 +258,7 @@ export class RoutesProvider {
       polyline: encodePolyline(dense),
       steps,
       toll: null,
-      description: q.avoidTolls ? 'Sample route avoiding tolls' : 'Sample route',
+      description: 'Sample route',
       sample: true,
     };
   }

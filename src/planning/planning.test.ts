@@ -185,11 +185,11 @@ describe('stops', () => {
 
 /** Wraps the sample providers and records what the planner asks Google for. */
 function spying() {
-  const routeQueries: { avoidTolls: boolean; tollPrices?: boolean }[] = [];
+  const routeQueries: { alternatives: boolean }[] = [];
   const placeQueries: string[] = [];
   class SpyRoutes extends RoutesProvider {
     override async compute(q: Parameters<RoutesProvider['compute']>[0], ctx: ProviderContext) {
-      routeQueries.push({ avoidTolls: q.avoidTolls, tollPrices: q.tollPrices });
+      routeQueries.push({ alternatives: q.alternatives });
       return super.compute(q, ctx);
     }
   }
@@ -222,21 +222,10 @@ describe('TripPlanner: Google calls per plan (cost)', () => {
     expect(s.placeQueries).toHaveLength(6);
   });
 
-  it('prices tolls only on the main route requests, not the toll-free ones', async () => {
+  it('makes one route request per leg (main route plus alternatives)', async () => {
     const s = spying();
     await new TripPlanner(s.p, { usdToCad: 1.38 }).generate(req);
-    const priced = s.routeQueries.filter((q) => q.tollPrices !== false);
-    const plain = s.routeQueries.filter((q) => q.tollPrices === false);
-    expect(priced.every((q) => !q.avoidTolls)).toBe(true);
-    expect(plain.length).toBeGreaterThan(0);
-    expect(plain.every((q) => q.avoidTolls)).toBe(true);
-  });
-
-  it('keeps toll prices on toll-free routes that cross a border (bridge tolls)', async () => {
-    const s = spying();
-    const us = TripRequest.parse({ ...req, destination: { address: 'Chicago, IL' }, preferences: { avoidTolls: true } });
-    await new TripPlanner(s.p, { usdToCad: 1.38 }).generate(us);
-    expect(s.routeQueries.filter((q) => q.avoidTolls).every((q) => q.tollPrices === true)).toBe(true);
+    expect(s.routeQueries).toEqual([{ alternatives: true }, { alternatives: true }]);
   });
 });
 

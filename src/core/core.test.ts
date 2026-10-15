@@ -209,7 +209,7 @@ describe('itinerary', () => {
 
     const issues = validatePlan({
       days: [day],
-      preferences: { pace: 'balanced', maxDrivingHoursPerDay: 3, interests: [], avoidTolls: false, includeParking: true },
+      preferences: { pace: 'balanced', maxDrivingHoursPerDay: 3, interests: [], includeParking: true },
       totalTripDays: 1,
       drivingDaysNeeded: 2,
     });

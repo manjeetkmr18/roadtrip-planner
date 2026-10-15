@@ -50,7 +50,7 @@ describe('Google Routes adapter', () => {
     );
     const ctx = new ProviderContext();
     const routes = await new RoutesProvider('k').compute(
-      { origin: { lat: 43.6, lng: -79.6 }, destination: { lat: 45.4, lng: -75.7 }, waypoints: [], departureIso: '2099-01-01T08:00:00-05:00', avoidTolls: false, alternatives: true, tollPasses: [], fuelType: 'hybrid' },
+      { origin: { lat: 43.6, lng: -79.6 }, destination: { lat: 45.4, lng: -75.7 }, waypoints: [], departureIso: '2099-01-01T08:00:00-05:00', alternatives: true, tollPasses: [], fuelType: 'hybrid' },
       ctx,
     );
     expect(sent!.body.extraComputations).toEqual(['TOLLS']);
@@ -63,24 +63,6 @@ describe('Google Routes adapter', () => {
     expect(routes[1].toll).toBeNull();
     expect(ctx.calls.routesWithTolls).toBe(1);
     expect(ctx.costUsd).toBeGreaterThan(0);
-  });
-});
-
-describe('Google Routes adapter: plain routes', () => {
-  it('skips toll pricing (Essentials SKU) when toll prices are not needed', async () => {
-    let sent: { body: Record<string, unknown>; mask: string } | undefined;
-    stubFetch({ routes: [{ distanceMeters: 1000, duration: '60s', polyline: { encodedPolyline: '' }, legs: [] }] }, (_url, init) => {
-      sent = { body: JSON.parse(String(init.body)), mask: new Headers(init.headers).get('X-Goog-FieldMask') ?? '' };
-    });
-    const ctx = new ProviderContext();
-    await new RoutesProvider('k').compute(
-      { origin: { lat: 43.6, lng: -79.6 }, destination: { lat: 45.4, lng: -75.7 }, waypoints: [], departureIso: '2099-01-01T08:00:00-05:00', avoidTolls: true, alternatives: false, tollPasses: ['CA_ON_407_ETR'], fuelType: 'gasoline', tollPrices: false },
-      ctx,
-    );
-    expect(sent!.body.extraComputations).toBeUndefined();
-    expect(sent!.mask).not.toContain('tollInfo');
-    expect(JSON.stringify(sent!.body.routeModifiers)).not.toContain('tollPasses');
-    expect(ctx.calls).toEqual({ routesEssentials: 1 });
   });
 });
 

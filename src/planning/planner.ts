@@ -92,7 +92,6 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T, i: number) =
 interface LegRoutes {
   fastest: RawRoute;
   alternative?: RawRoute;
-  avoidTolls?: RawRoute;
 }
 
 export interface PlannerOptions {
@@ -122,18 +121,10 @@ export class TripPlanner {
       tollPasses: req.vehicle.tollPasses,
       fuelType: req.vehicle.fuelType,
     };
-    const routes = await this.providers.routes.compute({ ...base, avoidTolls: false, alternatives: true }, ctx);
+    const routes = await this.providers.routes.compute({ ...base, alternatives: true }, ctx);
     if (!routes.length) throw new Error(`No driving route found from ${from.label} to ${to.label}`);
     const [fastest, alternative] = routes;
-    const tolled = (r: RawRoute) => r.toll != null || r.steps.some((s) => s.roads.includes('407') || /\b407\b|toll/i.test(s.instruction ?? ''));
-    let avoidTolls: RawRoute | undefined;
-    if (tolled(fastest) || req.preferences.avoidTolls) {
-      // The toll-free option normally has no tolls to price, so ask for a plain (Essentials) route.
-      // Border crossings are the exception: the bridges and tunnels charge tolls that can't be avoided.
-      const crossesBorder = [to, ...via].some((p) => p.country && from.country && p.country !== from.country);
-      [avoidTolls] = await this.providers.routes.compute({ ...base, avoidTolls: true, alternatives: false, tollPrices: crossesBorder }, ctx);
-    }
-    return { fastest, alternative, avoidTolls };
+    return { fastest, alternative };
   }
 
   async generate(req: TripRequest, ctx = new ProviderContext()): Promise<TripPlan> {
@@ -160,7 +151,6 @@ export class TripPlanner {
     const kinds: { kind: RouteKind; label: string; outRoute?: RawRoute; retRoute?: RawRoute }[] = [
       { kind: 'fastest', label: 'Fastest', outRoute: out.fastest, retRoute: ret?.fastest },
       { kind: 'alternative', label: 'Alternative', outRoute: out.alternative, retRoute: ret?.fastest },
-      { kind: 'avoid_tolls', label: 'Avoid tolls', outRoute: out.avoidTolls, retRoute: ret?.avoidTolls ?? ret?.fastest },
     ];
     const options: RouteOption[] = [];
     const legLinesByKind = new Map<RouteKind, CostLine[]>();
@@ -217,14 +207,12 @@ export class TripPlanner {
           : { name: 'Google Routes API', url: 'https://developers.google.com/maps/documentation/routes', retrievedAt: nowIso() },
       });
     }
-    // Drop an "avoid tolls" option identical to the fastest one.
+    // Drop an alternative that is the same road as the fastest one.
     const fastestOpt = options.find((o) => o.kind === 'fastest');
-    const filtered = options.filter(
-      (o) => o.kind === 'fastest' || !fastestOpt || Math.abs(o.distanceMeters - fastestOpt.distanceMeters) > 500 || o.hasTolls !== fastestOpt.hasTolls,
-    );
-    const selected = (req.preferences.avoidTolls && filtered.find((o) => o.kind === 'avoid_tolls')) || filtered.find((o) => o.kind === 'fastest')!;
-    const selOut = selected.kind === 'avoid_tolls' ? out.avoidTolls! : selected.kind === 'alternative' ? out.alternative! : out.fastest;
-    const selRet = ret ? (selected.kind === 'avoid_tolls' ? (ret.avoidTolls ?? ret.fastest) : ret.fastest) : undefined;
+    const filtered = options.filter((o) => o.kind === 'fastest' || !fastestOpt || Math.abs(o.distanceMeters - fastestOpt.distanceMeters) > 500);
+    const selected = filtered.find((o) => o.kind === 'fastest')!;
+    const selOut = out.fastest;
+    const selRet = ret?.fastest;
 
     // 4. Days: outbound driving days, free days at the destination, return driving days
     const maxH = req.preferences.maxDrivingHoursPerDay;

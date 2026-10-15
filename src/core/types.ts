@@ -52,7 +52,6 @@ export const PreferencesInput = z.object({
   pace: Pace.default('balanced'),
   maxDrivingHoursPerDay: z.number().min(1).max(14).default(6),
   interests: z.array(z.string()).default(['nature', 'famous attractions']),
-  avoidTolls: z.boolean().default(false),
   /** Paid parking budget assumption per stop, in trip currency. */
   includeParking: z.boolean().default(true),
 });
@@ -79,7 +78,6 @@ export const TripRequest = z
       pace: 'balanced',
       maxDrivingHoursPerDay: 6,
       interests: ['nature', 'famous attractions'],
-      avoidTolls: false,
       includeParking: true,
     }),
   })
@@ -121,6 +119,7 @@ export const CostSummary = z.object({
 });
 export type CostSummary = z.infer<typeof CostSummary>;
 
+/** 'avoid_tolls' only appears in plans saved before the toll-free option was removed. */
 export const RouteKind = z.enum(['fastest', 'avoid_tolls', 'alternative']);
 export type RouteKind = z.infer<typeof RouteKind>;
 
