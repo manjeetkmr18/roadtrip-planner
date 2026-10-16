@@ -3,8 +3,6 @@ import { createServer } from 'node:http';
 import { Logger, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { loadEnv } from './config/env.js';
-import { AppModule } from './app.module.js';
-import { setupDocs } from './docs.js';
 
 // Load .env when present (Node 22+); real environment variables win.
 try {
@@ -15,7 +13,11 @@ try {
 
 async function bootstrap() {
   const env = loadEnv();
-  const app = await NestFactory.create(AppModule.register(env));
+  // Loaded here (not at the top) so a failure while loading the app is caught and reported below.
+  const { AppModule } = await import('./app.module.js');
+  const { setupDocs } = await import('./docs.js');
+  // abortOnError: false makes Nest throw instead of exiting the process, so startupFailed can answer.
+  const app = await NestFactory.create(AppModule.register(env), { abortOnError: false });
   app.setGlobalPrefix('api');
   app.enableCors({ origin: env.WEB_ORIGIN.split(','), credentials: true });
   app.enableShutdownHooks();
@@ -36,7 +38,10 @@ async function startupFailed(err: unknown) {
   const e = err instanceof Error ? err : new Error(String(err));
   Logger.error(e.stack ?? e.message, 'Bootstrap');
   const config = /^(Invalid environment|Set [A-Z_]+)/.test(e.message);
-  const body = JSON.stringify({ ok: false, error: 'API failed to start', reason: config ? e.message : `${e.name} (see server logs)` });
+  // Other errors show their first line with anything that looks like a URL or credential removed.
+  const firstLine = e.message.split('\n')[0].slice(0, 300);
+  const safe = firstLine.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>').replace(/\b[A-Za-z0-9_\-]{24,}\b/g, '<redacted>');
+  const body = JSON.stringify({ ok: false, error: 'API failed to start', reason: config ? e.message : `${e.name}: ${safe}` });
   const send = (res: { writeHead: (s: number, h: Record<string, string>) => void; end: (b: string) => void }) => {
     res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(body);
