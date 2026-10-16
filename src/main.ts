@@ -9,6 +9,7 @@ import { ProvidersModule } from './providers/providers.module.js';
 import { AuthModule } from './auth/auth.js';
 import { TripsModule } from './trips/trips.module.js';
 import { MiscModule } from './misc.js';
+import { setupDocs } from './docs.js';
 
 // Load apps/api/.env when present (Node 22+); real environment variables win.
 try {
@@ -41,6 +42,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.enableCors({ origin: env.WEB_ORIGIN.split(','), credentials: true });
   app.enableShutdownHooks();
+  setupDocs(app, env);
   await app.listen(env.PORT);
   Logger.log(`API on http://localhost:${env.PORT}/api (queue: ${env.QUEUE_INLINE ? 'inline' : 'bullmq'}, providers: ${env.PROVIDER_MODE})`, 'Bootstrap');
 }

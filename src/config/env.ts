@@ -45,6 +45,16 @@ export const EnvSchema = z.object({
   /** Google Places searches per trip day (1 = interests take turns across days). */
   PLACES_SEARCHES_PER_DAY: z.coerce.number().int().min(1).max(4).default(1),
   FREE_TRIPS_PER_MONTH: z.coerce.number().int().min(0).default(3),
+
+  /** Postgres pool size. Serverless functions should keep this small (use Neon's pooled URL). */
+  DB_POOL_MAX: z.coerce.number().int().min(1).max(50).optional(),
+
+  /** API docs at /api/docs are only served when both are set, behind HTTP Basic auth. */
+  DOCS_USERNAME: optional,
+  DOCS_PASSWORD: optional.refine((v) => !v || v.length >= 12, 'DOCS_PASSWORD must be at least 12 characters'),
+
+  /** Set automatically on Vercel. */
+  VERCEL: optional,
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -54,10 +64,18 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   if (!parsed.success) {
     throw new Error(`Invalid environment:\n${parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n')}`);
   }
-  if (parsed.data.NODE_ENV === 'production' && parsed.data.JWT_SECRET.startsWith('dev-only')) {
-    throw new Error('Set JWT_SECRET in production');
+  const env = parsed.data;
+  const onVercel = !!env.VERCEL;
+  if ((env.NODE_ENV === 'production' || onVercel) && env.JWT_SECRET.startsWith('dev-only')) {
+    throw new Error('Set JWT_SECRET (at least 16 random characters) in production');
   }
-  return parsed.data;
+  if (onVercel && /localhost|127\.0\.0\.1/.test(env.DATABASE_URL)) {
+    throw new Error('Set DATABASE_URL to your Neon connection string on Vercel');
+  }
+  // Serverless functions can't run a BullMQ worker: plan in-process unless a REDIS_URL is set explicitly.
+  if (onVercel && source.QUEUE_INLINE === undefined && !source.REDIS_URL) env.QUEUE_INLINE = true;
+  env.DB_POOL_MAX ??= onVercel ? 3 : 10;
+  return env;
 }
 
 export const ENV = Symbol('ENV');

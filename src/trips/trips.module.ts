@@ -3,6 +3,7 @@ import { BullModule, InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { ModuleRef } from '@nestjs/core';
 import type { Job, Queue } from 'bullmq';
 import { Redis } from 'ioredis';
+import { waitUntil } from '@vercel/functions';
 import { AuthModule } from '../auth/auth.js';
 import { ShareController, TripsController } from './trips.controller.js';
 import { GENERATION_QUEUE, GenerationQueue, TripsService } from './trips.service.js';
@@ -27,7 +28,10 @@ class GenerationWorker extends WorkerHost {
   }
 }
 
-/** Runs generation in the API process. For local development and tests only. */
+/**
+ * Runs generation in the API process: local development, and serverless hosts (Vercel) where a
+ * BullMQ worker can't run. On Vercel, waitUntil keeps the function alive until the plan is saved.
+ */
 @Injectable()
 class InlineGenerationQueue extends GenerationQueue {
   private readonly log = new Logger('InlineQueue');
@@ -36,7 +40,12 @@ class InlineGenerationQueue extends GenerationQueue {
   }
   async enqueue(tripId: string) {
     const trips = this.moduleRef.get(TripsService, { strict: false });
-    setImmediate(() => trips.runGeneration(tripId).catch((e) => this.log.error(e)));
+    const run = () => trips.runGeneration(tripId).catch((e) => this.log.error(e));
+    if (process.env.VERCEL) {
+      waitUntil(run());
+    } else {
+      setImmediate(run);
+    }
   }
 }
 

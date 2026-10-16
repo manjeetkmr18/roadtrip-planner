@@ -111,13 +111,21 @@ GET  /api/trips/saved-stops/nearby?lat=&lng=&radiusKm=   (PostGIS)
 POST /api/feedback               GET /api/health
 ```
 
+### API docs (password protected)
+
+Interactive docs (Swagger UI) are at **`/api/docs`**, and the OpenAPI spec at `/api/docs-json` (or `/api/docs-yaml`). For example: `https://api.travlio.app/api/docs`.
+
+- They are behind a username and password (HTTP Basic auth). Set `DOCS_USERNAME` and `DOCS_PASSWORD` (12+ characters). **If either is missing, the docs aren't served at all**, so a deployment never exposes them by accident.
+- To try the signed-in endpoints from the docs: call `POST /api/auth/login`, copy the `token`, click **Authorize** and paste it.
+- Request bodies in the docs come from the same validators the API uses, so they stay in step with the code.
+
 ## Scripts
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | API with auto-reload |
 | `npm run build` / `npm start` | Production build / run |
-| `npm test` | 36 unit tests |
+| `npm test` | 52 unit tests |
 | `npm run typecheck` | TypeScript check |
 | `npm run db:generate` | New migration after changing `src/db/schema.ts` |
 | `npm run db:migrate` | Apply migrations (enables PostGIS) |
@@ -129,3 +137,26 @@ POST /api/feedback               GET /api/health
 - Set `WEB_ORIGIN` to the web app's URL. It controls CORS for browsers; separate several URLs with commas. The iOS and Android apps don't need it.
 - Phones reach the API over your network, so in development the API must be reachable from the phone (same Wi-Fi). It already listens on all network interfaces.
 - The BullMQ worker runs inside the API process. Add more instances to scale.
+
+### Hosting on Vercel (api.travlio.app) with Neon
+
+Vercel detects NestJS and runs the API as a function. Set these in the Vercel project → Settings → Environment Variables (Production):
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | Neon's **pooled** connection string (host contains `-pooler`), with `?sslmode=require` |
+| `JWT_SECRET` | 32+ random characters (`openssl rand -base64 32`) |
+| `WEB_ORIGIN` | `https://travlio.app,https://www.travlio.app` |
+| `DOCS_USERNAME`, `DOCS_PASSWORD` | To turn on `/api/docs` |
+| `NWS_USER_AGENT` | `travlio (you@yourdomain)` |
+| API keys | `GOOGLE_MAPS_API_KEY`, `AWS_REGION` + `BEDROCK_MODEL_ID` (+ AWS keys), etc. |
+
+On Vercel the app automatically plans trips in-process (no Redis or worker needed) and keeps the database pool small. It refuses to start with a missing `JWT_SECRET` or a localhost `DATABASE_URL`, so a misconfigured deploy fails loudly.
+
+Create the tables once on Neon from your computer (uses the direct, non-pooled URL):
+
+```bash
+DATABASE_URL="postgres://…neon.tech/neondb?sslmode=require" npm run db:migrate
+```
+
+Neon's free plan is fine to start; upgrade when traffic grows. To use a separate worker later, set `REDIS_URL` (e.g. Upstash) and `QUEUE_INLINE=false` and run the worker on a host that stays up.
