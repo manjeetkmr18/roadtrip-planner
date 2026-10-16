@@ -1,12 +1,12 @@
 import { Global, Module, type DynamicModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ENV, type Env } from './config/env.js';
 import { DbModule } from './db/db.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
 import { AuthModule } from './auth/auth.js';
 import { TripsModule } from './trips/trips.module.js';
 import { MiscModule } from './misc.js';
+import { RateLimitGuard } from './common/rate-limit.js';
 
 @Global()
 @Module({})
@@ -23,14 +23,13 @@ export class AppModule {
       module: AppModule,
       imports: [
         EnvModule.register(env),
-        ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
         DbModule,
         ProvidersModule,
         AuthModule,
         TripsModule.register({ inline: env.QUEUE_INLINE, redisUrl: env.REDIS_URL }),
         MiscModule,
       ],
-      providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+      providers: [{ provide: APP_GUARD, useClass: RateLimitGuard }],
     };
   }
 }
