@@ -96,7 +96,8 @@ interface LegRoutes {
 }
 
 export interface PlannerOptions {
-  usdToCad: number;
+  /** CAD per USD, or a function that looks up the current rate (read once per plan). */
+  usdToCad: number | (() => Promise<number>);
   /**
    * Google Places searches per trip day (each is a billed Text Search Enterprise call).
    * With 1, the traveller's interests take turns across the days. Default 1.
@@ -142,6 +143,7 @@ export class TripPlanner {
   async generate(req: TripRequest, ctx = new ProviderContext()): Promise<TripPlan> {
     const started = nowIso();
     const p = this.providers;
+    const usdToCad = typeof this.opts.usdToCad === 'number' ? this.opts.usdToCad : await this.opts.usdToCad();
 
     // 1. Places
     const [origin, destination, ...waypoints] = await Promise.all(
@@ -174,7 +176,7 @@ export class TripPlanner {
         req,
         p,
         ctx,
-        this.opts.usdToCad,
+        usdToCad,
       );
       if (k.retRoute) {
         lines.push(
@@ -194,7 +196,7 @@ export class TripPlanner {
             req,
             p,
             ctx,
-            this.opts.usdToCad,
+            usdToCad,
           )),
         );
       }

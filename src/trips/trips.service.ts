@@ -2,6 +2,7 @@ import { ForbiddenException, Inject, Injectable, Logger, NotFoundException, Http
 import { and, count, desc, eq, gte, sql } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import type { TripRequest } from '../core/index.js';
+import { ExchangeRates } from '../providers/fx.js';
 import { DB, type Db } from '../db/db.module.js';
 import { generations, trips, tripStops, users } from '../db/schema.js';
 import { ENV, type Env } from '../config/env.js';
@@ -28,7 +29,8 @@ export class TripsService {
     private readonly queue: GenerationQueue,
     providers: Providers,
   ) {
-    this.planner = new TripPlanner(providers, { usdToCad: env.USD_CAD_RATE, placesSearchesPerDay: env.PLACES_SEARCHES_PER_DAY });
+    const fx = new ExchangeRates(env.USD_CAD_RATE);
+    this.planner = new TripPlanner(providers, { usdToCad: () => fx.usdToCad(), placesSearchesPerDay: env.PLACES_SEARCHES_PER_DAY });
   }
 
   private defaultTitle(r: TripRequest) {
