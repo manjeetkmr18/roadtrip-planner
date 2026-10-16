@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { createServer } from 'node:http';
-import { Logger } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { loadEnv } from './config/env.js';
 import { AppModule } from './app.module.js';
@@ -29,15 +29,27 @@ async function bootstrap() {
  * that says why, instead of crashing. Only configuration messages are shown; they name settings,
  * never their values.
  */
-function startupFailed(err: unknown) {
+@Module({})
+class StartupErrorModule {}
+
+async function startupFailed(err: unknown) {
   const e = err instanceof Error ? err : new Error(String(err));
   Logger.error(e.stack ?? e.message, 'Bootstrap');
   const config = /^(Invalid environment|Set [A-Z_]+)/.test(e.message);
   const body = JSON.stringify({ ok: false, error: 'API failed to start', reason: config ? e.message : `${e.name} (see server logs)` });
-  createServer((_req, res) => {
+  const send = (res: { writeHead: (s: number, h: Record<string, string>) => void; end: (b: string) => void }) => {
     res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(body);
-  }).listen(Number(process.env.PORT) || 4000);
+  };
+  const port = Number(process.env.PORT) || 4000;
+  try {
+    // A bare Nest app, so hosts that wrap Nest's listen() (Vercel) still serve the message.
+    const app = await NestFactory.create(StartupErrorModule, { logger: false });
+    app.use((_req: unknown, res: Parameters<typeof send>[0]) => send(res));
+    await app.listen(port);
+  } catch {
+    createServer((_req, res) => send(res)).listen(port);
+  }
 }
 
 bootstrap().catch(startupFailed);
