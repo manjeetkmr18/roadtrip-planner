@@ -32,29 +32,13 @@ import {
 import type { Providers } from '../providers/providers.module.js';
 import type { RawRoute, ResolvedPlace, CandidatePlace } from '../providers/google.js';
 import { nowIso, ProviderContext } from '../providers/infra.js';
+import { timeZoneAt } from '../core/timezone.js';
 import { legCostLines, parkingLine } from './route-costs.js';
+import { flyDriveCosts, flyDriveIssues, roadTripFor } from './fly-drive.js';
 import { chooseStops, interestQueries, rankCandidates, toStop, type DayChoiceInput } from './stops.js';
 
-const REGION_TZ: Record<string, string> = {
-  BC: 'America/Vancouver',
-  AB: 'America/Edmonton',
-  SK: 'America/Regina',
-  MB: 'America/Winnipeg',
-  ON: 'America/Toronto',
-  QC: 'America/Toronto',
-  NB: 'America/Halifax',
-  NS: 'America/Halifax',
-  PE: 'America/Halifax',
-  NL: 'America/St_Johns',
-};
-
 function timeZoneFor(p: ResolvedPlace): string {
-  if (p.region && REGION_TZ[p.region] && p.country !== 'US') return REGION_TZ[p.region];
-  const lng = p.location.lng;
-  if (lng > -87.5) return 'America/New_York';
-  if (lng > -101) return 'America/Chicago';
-  if (lng > -114) return 'America/Denver';
-  return 'America/Los_Angeles';
+  return timeZoneAt(p);
 }
 
 /** ISO timestamp with the correct UTC offset for a local date + time in a time zone. */
@@ -140,19 +124,26 @@ export class TripPlanner {
     return { fastest, alternative };
   }
 
-  async generate(req: TripRequest, ctx = new ProviderContext()): Promise<TripPlan> {
+  async generate(input: TripRequest, ctx = new ProviderContext()): Promise<TripPlan> {
     const started = nowIso();
+    // Fly + drive: plan the road trip on the ground, from the arrival airport.
+    const road = roadTripFor(input);
+    const req = road.req;
     const p = this.providers;
     const usdToCad = typeof this.opts.usdToCad === 'number' ? this.opts.usdToCad : await this.opts.usdToCad();
 
     // 1. Places
     const [origin, destination, ...waypoints] = await Promise.all(
-      [req.origin, req.destination, ...req.waypoints].map((x) => p.geocoding.resolve(x, ctx)),
+      [req.origin, req.destination, ...req.waypoints].map((x, i) =>
+        i === 0 && road.resolvedOrigin ? road.resolvedOrigin : i === 1 && road.resolvedDestination ? road.resolvedDestination : p.geocoding.resolve(x, ctx),
+      ),
     );
     const tz = timeZoneFor(origin);
-    const departureIso = localIso(req.startDate, req.departureTime, tz);
-    const departureMinutes = parseHHMM(req.departureTime);
+    const firstDeparture = road.firstDayDeparture ?? req.departureTime;
+    const departureIso = localIso(req.startDate, firstDeparture, tz);
+    const departureMinutes = parseHHMM(firstDeparture);
     const totalDays = daysBetween(req.startDate, req.endDate) + 1;
+    const travelLines = flyDriveCosts(input, totalDays, usdToCad);
 
     // 2. Routes (outbound + optional return)
     const out = await this.legRoutes(origin, destination, waypoints, departureIso, req, ctx);
@@ -203,9 +194,11 @@ export class TripPlanner {
       legLinesByKind.set(k.kind, lines);
       const distance = k.outRoute.distanceMeters + (k.retRoute?.distanceMeters ?? 0);
       const duration = k.outRoute.durationSeconds + (k.retRoute?.durationSeconds ?? 0);
-      const allLines = req.preferences.includeParking
-        ? [...lines, parkingLine({ urbanStops: totalDays, otherStops: totalDays, overnights: nights, currency: req.currency })]
-        : lines;
+      const allLines = [
+        ...lines,
+        ...(req.preferences.includeParking ? [parkingLine({ urbanStops: totalDays, otherStops: totalDays, overnights: nights, currency: req.currency })] : []),
+        ...travelLines,
+      ];
       options.push({
         id: k.kind,
         kind: k.kind,
@@ -264,6 +257,8 @@ export class TripPlanner {
       }
     };
     await pushDriving(outSegs, destination);
+    // Fly + drive: the first day starts after landing and picking up the car.
+    if (road.firstDayDeparture && drafts[0]) drafts[0].day.departureTime = road.firstDayDeparture;
     for (let i = 0; i < freeDays; i++) {
       dayNo++;
       drafts.push({
@@ -426,7 +421,7 @@ export class TripPlanner {
       const attractionStops = days.flatMap((d) => d.stops.filter((s) => s.kind === 'attraction' || s.kind === 'waypoint'));
       const urbanDays = drafts.filter((d) => d.endResolved.urban).length;
       const park = parkingLine({ urbanStops: Math.min(urbanDays, attractionStops.length), otherStops: Math.max(0, attractionStops.length - urbanDays), overnights: nights, currency: req.currency });
-      const lines = [...(legLinesByKind.get(selected.kind) ?? []), park];
+      const lines = [...(legLinesByKind.get(selected.kind) ?? []), park, ...travelLines];
       selected.costs = lines;
       selected.summary = summarizeCosts(lines, req.currency);
     }
@@ -455,6 +450,7 @@ export class TripPlanner {
       totalTripDays: totalDays,
       drivingDaysNeeded: outDays + retDays,
     });
+    issues.push(...flyDriveIssues(input, days));
     if (new Set(countries).size > 1) {
       issues.push({
         severity: 'info',
@@ -480,7 +476,7 @@ export class TripPlanner {
 
     return {
       generatedAt: started,
-      request: req,
+      request: input,
       selectedRouteId: selected.id,
       routes: filtered,
       days,

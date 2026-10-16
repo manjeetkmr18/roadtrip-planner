@@ -3,6 +3,9 @@ import { and, count, desc, eq, gte, sql } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import type { TripRequest } from '../core/index.js';
 import { ExchangeRates } from '../providers/fx.js';
+import { TtlCache } from '../providers/infra.js';
+import { travelOptions } from '../planning/travel-options.js';
+import type { TravelOptions, TravelOptionsQuery } from '../core/index.js';
 import { DB, type Db } from '../db/db.module.js';
 import { generations, trips, tripStops, users } from '../db/schema.js';
 import { ENV, type Env } from '../config/env.js';
@@ -27,10 +30,17 @@ export class TripsService {
     @Inject(DB) private readonly db: Db,
     @Inject(ENV) private readonly env: Env,
     private readonly queue: GenerationQueue,
-    providers: Providers,
+    private readonly providers: Providers,
   ) {
     const fx = new ExchangeRates(env.USD_CAD_RATE);
     this.planner = new TripPlanner(providers, { usdToCad: () => fx.usdToCad(), placesSearchesPerDay: env.PLACES_SEARCHES_PER_DAY });
+  }
+
+  /** Same search within 10 minutes is answered from memory (route + flight calls cost money). */
+  private readonly optionsCache = new TtlCache<TravelOptions>(10 * 60_000);
+
+  travelOptions(q: TravelOptionsQuery) {
+    return this.optionsCache.get(JSON.stringify(q), () => travelOptions(q, this.providers));
   }
 
   private defaultTitle(r: TripRequest) {

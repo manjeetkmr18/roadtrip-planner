@@ -28,6 +28,8 @@ export const EnvSchema = z.object({
 
   GOOGLE_MAPS_API_KEY: optional,
   TOLLGURU_API_KEY: optional,
+  /** Duffel flight search (fly + drive). Without it, flights are sample data. */
+  DUFFEL_ACCESS_TOKEN: optional,
 
   AWS_REGION: optional,
   BEDROCK_MODEL_ID: optional,

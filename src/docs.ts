@@ -4,7 +4,7 @@ import { Logger } from '@nestjs/common';
 import { SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
-import { TripPlan, TripRequest } from './core/index.js';
+import { TravelOptions, TravelOptionsQuery, TripPlan, TripRequest } from './core/index.js';
 import type { Env } from './config/env.js';
 
 /**
@@ -87,6 +87,8 @@ export function buildOpenApi(serverUrl?: string): OpenAPIObject {
         TripRecord: out(TripRecord),
         TripListItem: out(TripListItem),
         TripPlan: out(TripPlan),
+        TravelOptionsQuery: json(TravelOptionsQuery),
+        TravelOptions: out(TravelOptions),
         Usage: out(Usage),
         Feedback: json(Feedback),
         Error: out(ErrorBody),
@@ -96,6 +98,16 @@ export function buildOpenApi(serverUrl?: string): OpenAPIObject {
       '/api/auth/register': { post: { tags: ['Auth'], summary: 'Create an account', requestBody: body('Credentials'), responses: { 201: ok('AuthResult', 'Account created'), ...errors(400, 409, 429) } } },
       '/api/auth/login': { post: { tags: ['Auth'], summary: 'Sign in', requestBody: body('Login'), responses: { 200: ok('AuthResult'), ...errors(400, 401, 429) } } },
       '/api/auth/me': { get: { tags: ['Auth'], summary: 'The signed-in user', security: secured, responses: { 200: ok('Me'), ...errors(401) } } },
+      '/api/trips/travel-options': {
+        post: {
+          tags: ['Trips'],
+          summary: 'Drive vs fly + drive, with flights for the dates',
+          description: 'Checks whether the trip can be driven and how long it takes, recommends drive or fly + drive, and lists flights from the nearest airports (Duffel, or sample flights without DUFFEL_ACCESS_TOKEN). Not saved and not counted as a plan. Put a chosen flight in TripRequest.travel.',
+          security: secured,
+          requestBody: body('TravelOptionsQuery'),
+          responses: { 200: ok('TravelOptions'), ...errors(400, 401, 429) },
+        },
+      },
       '/api/trips': {
         get: { tags: ['Trips'], summary: 'My trips', security: secured, responses: { 200: { description: 'OK', content: { 'application/json': { schema: { type: 'array', items: ref('TripListItem') } } } }, ...errors(401) } },
         post: { tags: ['Trips'], summary: 'Create a trip (draft, not planned yet)', security: secured, requestBody: body('TripRequest'), responses: { 201: ok('TripRecord', 'Created'), ...errors(400, 401) } },

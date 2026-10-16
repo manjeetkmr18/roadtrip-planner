@@ -14,6 +14,7 @@ import {
 } from '../core/index.js';
 import { fetchJson, nowIso, ProviderContext } from './infra.js';
 import { findSamplePlace, nearestSamplePlace } from './sample-data.js';
+import { findAirportCity, nearestAirports } from './airports.js';
 
 // ---------------- Geocoding ----------------
 
@@ -56,6 +57,12 @@ export class GeocodingProvider {
   async resolve(input: PlaceInput, ctx: ProviderContext): Promise<ResolvedPlace> {
     if (!this.key) {
       const s = findSamplePlace(input.address) ?? (input.location ? nearestSamplePlace(input.location) : undefined);
+      const far = !s || (input.location && haversineMeters(input.location, s.location) > 300_000);
+      const city = !findSamplePlace(input.address) ? findAirportCity(input.address) : undefined;
+      if (city && (!s || far)) {
+        ctx.sample('Locations use a built-in sample city list (no GOOGLE_MAPS_API_KEY).');
+        return { label: `${city.city}, ${city.country}`, location: input.location ?? city.location, country: city.country, urban: true };
+      }
       if (!s) throw new Error(`Sample mode only knows major Canadian/US cities; could not place "${input.address}". Add GOOGLE_MAPS_API_KEY.`);
       ctx.sample('Locations use a built-in sample city list (no GOOGLE_MAPS_API_KEY).');
       return { label: `${s.name}, ${s.region}`, location: input.location ?? s.location, country: s.country, region: s.region, urban: s.urban };
@@ -74,6 +81,12 @@ export class GeocodingProvider {
       const s = nearestSamplePlace(p);
       ctx.sample('Locations use a built-in sample city list (no GOOGLE_MAPS_API_KEY).');
       const d = haversineMeters(p, s.location);
+      if (d > 300_000) {
+        // Outside the sample list's area (e.g. Europe): name the nearest airport city instead.
+        const a = nearestAirports(p, 1, 400)[0];
+        const ad = a ? haversineMeters(p, a.location) : Infinity;
+        if (a) return { label: ad < 40_000 ? `${a.city}, ${a.country}` : `near ${a.city}, ${a.country}`, location: p, country: a.country, urban: ad < 15_000 };
+      }
       return {
         label: d < 40_000 ? `${s.name}, ${s.region}` : `near ${s.name}, ${s.region}`,
         location: p,

@@ -1,3 +1,4 @@
+import { FlightsProvider } from '../providers/flights.js';
 import { describe, expect, it } from 'vitest';
 import { encodePolyline, TripRequest, type RouteStep, type WeatherObservation } from '../core/index.js';
 import { find407, legCostLines } from './route-costs.js';
@@ -49,6 +50,7 @@ function providers(over: Partial<Record<keyof Providers, unknown>> = {}): Provid
     fuel: new FuelPriceProvider(),
     tollguru: new TollGuruProvider(),
     llm: noLlm,
+    flights: new FlightsProvider(),
     ...over,
   } as unknown as Providers;
 }

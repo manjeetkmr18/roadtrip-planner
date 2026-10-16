@@ -62,6 +62,67 @@ export const PreferencesInput = z.object({
 });
 export type PreferencesInput = z.infer<typeof PreferencesInput>;
 
+// ---------- Getting there (fly + drive) ----------
+
+export const Airport = z.object({
+  iata: z.string().length(3),
+  name: z.string(),
+  city: z.string(),
+  country: z.string(),
+  location: LatLng,
+});
+export type Airport = z.infer<typeof Airport>;
+
+/** Local date-time at the airport, no offset: YYYY-MM-DDTHH:MM. */
+const localDateTime = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'Use YYYY-MM-DDTHH:MM');
+
+export const FlightSegment = z.object({
+  carrier: z.string(),
+  carrierCode: z.string().optional(),
+  flightNumber: z.string(),
+  from: z.string(),
+  to: z.string(),
+  departLocal: localDateTime,
+  arriveLocal: localDateTime,
+});
+export type FlightSegment = z.infer<typeof FlightSegment>;
+
+/** One flight option for one direction. Not a booking: prices are what the search returned. */
+export const FlightOffer = z.object({
+  id: z.string(),
+  from: Airport,
+  to: Airport,
+  departLocal: localDateTime,
+  arriveLocal: localDateTime,
+  durationMinutes: z.number(),
+  stops: z.number().int().min(0),
+  carrier: z.string(),
+  segments: z.array(FlightSegment),
+  /** Total for all travellers, in `currency`. Null when the search gave no price. */
+  price: z.number().nullable(),
+  currency: z.string(),
+  travellers: z.number().int().min(1),
+  sample: z.boolean(),
+  source: SourceRef,
+  /** Opens the same search on a flight site, to compare and book there. */
+  searchUrl: z.string(),
+});
+export type FlightOffer = z.infer<typeof FlightOffer>;
+
+export const TravelMode = z.enum(['drive', 'fly_drive']);
+export type TravelMode = z.infer<typeof TravelMode>;
+
+export const TravelInput = z.object({
+  /** fly_drive: fly to the destination area, then road-trip from the arrival airport in a rental car. */
+  mode: TravelMode.default('drive'),
+  travellers: z.number().int().min(1).max(9).default(1),
+  outbound: FlightOffer.optional(),
+  return: FlightOffer.optional(),
+  /** Include a rental-car estimate (fly + drive). */
+  rentalCar: z.boolean().default(true),
+});
+export type TravelInput = z.infer<typeof TravelInput>;
+
 export const TripRequest = z
   .object({
     title: z.string().max(120).optional(),
@@ -88,14 +149,16 @@ export const TripRequest = z
       avoidFerries: false,
       creatorMode: false,
     }),
+    travel: TravelInput.default({ mode: 'drive', travellers: 1, rentalCar: true }),
   })
+  .refine((t) => t.travel.mode === 'drive' || !!t.travel.outbound, { message: 'Pick an outbound flight for fly + drive', path: ['travel', 'outbound'] })
   .refine((t) => t.endDate >= t.startDate, { message: 'endDate must be on or after startDate', path: ['endDate'] });
 export type TripRequest = z.infer<typeof TripRequest>;
 export type TripRequestInput = z.input<typeof TripRequest>;
 
 // ---------- Plan output ----------
 
-export const CostCategory = z.enum(['toll', 'etr407', 'fuel', 'charging', 'parking', 'border', 'other']);
+export const CostCategory = z.enum(['toll', 'etr407', 'fuel', 'charging', 'parking', 'border', 'flight', 'rental', 'other']);
 export type CostCategory = z.infer<typeof CostCategory>;
 
 /** One line of the cost report with a low / typical / high range. Null = amount unknown. */
@@ -299,3 +362,40 @@ export const TripPlan = z.object({
   apiCostUsd: z.number(),
 });
 export type TripPlan = z.infer<typeof TripPlan>;
+
+// ---------- Getting there: drive vs fly + drive ----------
+
+export const TravelOptionsQuery = z.object({
+  origin: PlaceInput,
+  destination: PlaceInput,
+  startDate: isoDate,
+  endDate: isoDate,
+  roundTrip: z.boolean().default(false),
+  travellers: z.number().int().min(1).max(9).default(1),
+  maxDrivingHoursPerDay: z.number().min(1).max(14).default(6),
+});
+export type TravelOptionsQuery = z.infer<typeof TravelOptionsQuery>;
+
+export const TravelOptions = z.object({
+  origin: z.object({ label: z.string(), location: LatLng }),
+  destination: z.object({ label: z.string(), location: LatLng }),
+  straightLineKm: z.number(),
+  drive: z.object({
+    possible: z.boolean(),
+    distanceMeters: z.number().optional(),
+    durationSeconds: z.number().optional(),
+    /** Driving days needed each way at the traveller's max hours per day. */
+    daysEachWay: z.number().optional(),
+    note: z.string(),
+  }),
+  recommendation: TravelMode,
+  reason: z.string(),
+  fromAirports: z.array(Airport),
+  toAirports: z.array(Airport),
+  outbound: z.array(FlightOffer),
+  return: z.array(FlightOffer),
+  /** True when flights are sample data (no flight search key). */
+  sampleFlights: z.boolean(),
+  notes: z.array(z.string()),
+});
+export type TravelOptions = z.infer<typeof TravelOptions>;

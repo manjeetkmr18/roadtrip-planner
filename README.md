@@ -67,12 +67,24 @@ src/
 7. **Arrange the days.** Bedrock picks and describes stops, but only from the list it was given. Without Bedrock, the ranking is used as-is.
 8. **Run the checks in code.** Driving hours, opening hours, stop order, day length, late arrival, trip length, border crossing, road closures (Ontario 511) and travel advisories.
 
+### Fly + drive
+
+For long trips, `POST /api/trips/travel-options` says whether the trip can be driven (and in how many days),
+recommends **drive** or **fly + drive**, and lists flights from the nearest airports for the dates
+(Duffel, or sample flights without a key). Toronto → Paris has no road; Toronto → Calgary is 6+ days each way.
+
+When the traveller picks flights (`TripRequest.travel`), the road trip starts at the arrival airport an hour
+after landing (90 minutes after an international flight) and ends at the return flight's airport. The cost
+report adds the flights and a rental-car estimate, and the checks warn if the last day runs past check-in time.
+Travlio does not book flights; each flight links to the same search on Google Flights.
+
 ## API keys (`.env`)
 
 | Variable | Used for | Notes |
 |---|---|---|
 | `GOOGLE_MAPS_API_KEY` | Geocoding, Routes (tolls), Places (New) | Server key, restrict by API + IP |
 | `TOLLGURU_API_KEY` | Toll cross-check / Canada tolls | Optional |
+| `DUFFEL_ACCESS_TOKEN` | Real flights for fly + drive | Optional; searching is free. Without it, flights are sample data |
 | `AWS_REGION`, `BEDROCK_MODEL_ID` + AWS credentials | Stop choice and day descriptions | Model must be enabled in Bedrock |
 | `ONTARIO_511_API_KEY` | Road closures | Free key from 511on.ca |
 | `OILPRICEAPI_KEY`, `EIA_API_KEY` | Current fuel prices (Canada / US) | Free tiers; otherwise labelled defaults |

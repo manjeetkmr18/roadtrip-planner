@@ -52,6 +52,7 @@ export class HealthController {
       providers: {
         googleMaps: live && !!this.env.GOOGLE_MAPS_API_KEY,
         tollGuru: live && !!this.env.TOLLGURU_API_KEY,
+        flights: live && !!this.env.DUFFEL_ACCESS_TOKEN,
         bedrock: live && !!this.env.AWS_REGION && !!this.env.BEDROCK_MODEL_ID,
         ontario511: live && !!this.env.ONTARIO_511_API_KEY,
         fuelPricesCanada: live && !!this.env.OILPRICEAPI_KEY,

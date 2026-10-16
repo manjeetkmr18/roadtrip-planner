@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
-import { TripRequest } from '../core/index.js';
+import { TravelOptionsQuery, TripRequest } from '../core/index.js';
 import { CurrentUser, JwtGuard, type AuthUser } from '../auth/auth.js';
 import { ZodPipe } from '../common/zod.pipe.js';
 import { TripsService } from './trips.service.js';
@@ -25,6 +25,12 @@ export class TripsController {
   @Get('saved-stops/nearby')
   nearby(@CurrentUser() user: AuthUser, @Query(new ZodPipe(Nearby)) q: z.infer<typeof Nearby>) {
     return this.trips.nearbySavedStops(user, q.lat, q.lng, q.radiusKm);
+  }
+
+  /** Drive vs fly + drive for a trip, with flights for the dates (not saved, not counted as a plan). */
+  @Post('travel-options')
+  travelOptions(@Body(new ZodPipe(TravelOptionsQuery)) body: TravelOptionsQuery) {
+    return this.trips.travelOptions(body);
   }
 
   @Post()

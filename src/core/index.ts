@@ -7,3 +7,4 @@ export * from './weather.js';
 export * from './itinerary.js';
 export * from './feasibility.js';
 export * from './sun.js';
+export * from './timezone.js';
