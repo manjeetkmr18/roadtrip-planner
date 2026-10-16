@@ -72,8 +72,10 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   if (onVercel && /localhost|127\.0\.0\.1/.test(env.DATABASE_URL)) {
     throw new Error('Set DATABASE_URL to your Neon connection string on Vercel');
   }
-  // Serverless functions can't run a BullMQ worker: plan in-process unless a REDIS_URL is set explicitly.
-  if (onVercel && source.QUEUE_INLINE === undefined && !source.REDIS_URL) env.QUEUE_INLINE = true;
+  // Serverless functions can't reach a local Redis or keep a BullMQ worker running: plan in-process
+  // unless a real (non-local) REDIS_URL is set and QUEUE_INLINE isn't forced on.
+  const localRedis = !source.REDIS_URL || /localhost|127\.0\.0\.1/.test(env.REDIS_URL);
+  if (onVercel && localRedis) env.QUEUE_INLINE = true;
   env.DB_POOL_MAX ??= onVercel ? 3 : 10;
   return env;
 }

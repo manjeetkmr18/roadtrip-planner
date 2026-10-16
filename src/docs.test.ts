@@ -45,6 +45,10 @@ describe('Vercel environment', () => {
     expect(env.QUEUE_INLINE).toBe(true);
     expect(env.DB_POOL_MAX).toBe(3);
   });
+  it('ignores a copied local Redis setting on Vercel', () => {
+    expect(loadEnv({ ...base, QUEUE_INLINE: 'false', REDIS_URL: 'redis://localhost:6379' }).QUEUE_INLINE).toBe(true);
+    expect(loadEnv({ ...base, QUEUE_INLINE: 'false', REDIS_URL: 'rediss://default:x@eu1.upstash.io:6379' }).QUEUE_INLINE).toBe(false);
+  });
   it('fails clearly without a JWT secret or a real database', () => {
     expect(() => loadEnv({ ...base, JWT_SECRET: undefined })).toThrow(/JWT_SECRET/);
     expect(() => loadEnv({ ...base, DATABASE_URL: undefined })).toThrow(/DATABASE_URL/);
