@@ -57,8 +57,12 @@ export class PlaceSearchProvider {
       body: JSON.stringify({
         input: q,
         ...(opts.session ? { sessionToken: opts.session } : {}),
-        // Nudge results toward the trip's area without excluding anywhere else.
-        ...(opts.near ? { locationBias: { circle: { center: { latitude: opts.near.lat, longitude: opts.near.lng }, radius: 50_000 } } } : {}),
+        // Nudge results toward the trip's area (or the user's) without excluding anywhere else.
+        // With no hint at all Google would bias toward the server's own location (a US data
+        // centre), so fall back to North America.
+        locationBias: opts.near
+          ? { circle: { center: { latitude: opts.near.lat, longitude: opts.near.lng }, radius: 50_000 } }
+          : { rectangle: { low: { latitude: 24, longitude: -141 }, high: { latitude: 70, longitude: -52 } } },
       }),
       timeoutMs: 6_000,
       retries: 0,

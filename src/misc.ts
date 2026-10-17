@@ -1,4 +1,4 @@
-import { BadGatewayException, BadRequestException, Body, Controller, Get, Inject, Logger, Module, Post, Query, UseGuards } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Body, Controller, Get, Headers, Inject, Logger, Module, Post, Query, UseGuards } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DB, type Db } from './db/db.module.js';
@@ -41,6 +41,14 @@ const Details = z.object({
   session: z.string().regex(SESSION_TOKEN).optional(),
 });
 
+/** Approximate location of the caller from Vercel's IP geolocation headers, if present and sane. */
+export function visitorLocation(h: Record<string, string | undefined>) {
+  const lat = Number(h['x-vercel-ip-latitude']);
+  const lng = Number(h['x-vercel-ip-longitude']);
+  if (!h['x-vercel-ip-latitude'] || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return undefined;
+  return { lat, lng };
+}
+
 /** Type-ahead for the trip form's place fields. Signed-in only, so the Google key can't be farmed. */
 @Controller('places')
 @UseGuards(JwtGuard)
@@ -49,8 +57,9 @@ export class PlacesController {
   constructor(private readonly p: Providers) {}
 
   @Get('autocomplete')
-  async autocomplete(@Query(new ZodPipe(Suggest)) q: z.infer<typeof Suggest>) {
-    const near = q.lat !== undefined && q.lng !== undefined ? { lat: q.lat, lng: q.lng } : undefined;
+  async autocomplete(@Query(new ZodPipe(Suggest)) q: z.infer<typeof Suggest>, @Headers() h: Record<string, string | undefined>) {
+    // The trip's start when the form knows it, else roughly where the user is (Vercel's IP geolocation).
+    const near = q.lat !== undefined && q.lng !== undefined ? { lat: q.lat, lng: q.lng } : visitorLocation(h);
     try {
       return { live: this.p.placeSearch.live, suggestions: await this.p.placeSearch.suggest(q.q, { session: q.session, near }) };
     } catch (e) {

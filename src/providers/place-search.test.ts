@@ -70,3 +70,20 @@ describe('Google Routes request', () => {
     expect(body).not.toHaveProperty('departureTime');
   });
 });
+
+describe('suggestion bias', () => {
+  it('falls back to North America rather than the server location', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ suggestions: [] })));
+    vi.stubGlobal('fetch', fetch);
+    await new PlaceSearchProvider('k').suggest('Banf');
+    const body = JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.locationBias.rectangle).toBeDefined();
+  });
+
+  it('reads the visitor location from Vercel headers', async () => {
+    const { visitorLocation } = await import('../misc.js');
+    expect(visitorLocation({ 'x-vercel-ip-latitude': '43.65', 'x-vercel-ip-longitude': '-79.38' })).toEqual({ lat: 43.65, lng: -79.38 });
+    expect(visitorLocation({})).toBeUndefined();
+    expect(visitorLocation({ 'x-vercel-ip-latitude': 'x', 'x-vercel-ip-longitude': '1' })).toBeUndefined();
+  });
+});
