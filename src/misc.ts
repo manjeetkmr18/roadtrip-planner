@@ -6,6 +6,7 @@ import { feedback } from './db/schema.js';
 import { AuthModule, CurrentUser, JwtGuard, type AuthUser } from './auth/auth.js';
 import { ZodPipe } from './common/zod.pipe.js';
 import { ENV, type Env } from './config/env.js';
+import { IntegrationsController } from './integrations.js';
 
 const Feedback = z.object({
   tripId: z.uuid().optional(),
@@ -64,5 +65,5 @@ export class HealthController {
   }
 }
 
-@Module({ imports: [AuthModule], controllers: [FeedbackController, HealthController] })
+@Module({ imports: [AuthModule], controllers: [FeedbackController, HealthController, IntegrationsController] })
 export class MiscModule {}

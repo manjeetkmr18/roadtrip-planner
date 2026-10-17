@@ -1,5 +1,5 @@
 import { addDays, daysBetween, haversineMeters, parseForecastText, type LatLng, type WeatherAlert, type WeatherObservation } from '../core/index.js';
-import { fetchJson, nowIso, TtlCache } from './infra.js';
+import { fetchJson, nowIso, ProviderError, TtlCache } from './infra.js';
 
 /**
  * Weather from free sources, best first:
@@ -169,6 +169,8 @@ function alertSeverity(text: string): WeatherAlert['severity'] {
 export class WeatherProvider {
   private cityCache = new TtlCache<MscCity[]>(30 * 60_000);
   private nwsCache = new TtlCache<unknown>(30 * 60_000);
+  /** Points the US service said it doesn't cover (outside the US), so they aren't asked again. */
+  private nwsNotCovered = new Set<string>();
   private metCache = new TtlCache<MetSeries[]>(30 * 60_000);
   private climateCache = new TtlCache<Record<string, Record<string, number>>>(7 * 24 * 3_600_000);
 
@@ -182,7 +184,13 @@ export class WeatherProvider {
     const ahead = daysBetween(new Date().toISOString().slice(0, 10), date);
     if (ahead < 0) return { date, place: placeLabel, kind: 'unavailable', summary: 'This date has passed', alerts: [] };
     if (ahead <= NATIONAL_DAYS) {
-      for (const source of [() => this.fromMsc(p, date, placeLabel), () => this.fromNws(p, date, placeLabel)]) {
+      // South of ~49°N (and in Alaska) ask the US service first: it answers "not covered" for Canadian
+      // points, whereas Environment Canada would happily match a US place to a Canadian city nearby
+      // (Buffalo → Fort Erie) and miss the US alerts.
+      const usFirst = p.lat < 49.1 || p.lng < -129;
+      const msc = () => this.fromMsc(p, date, placeLabel);
+      const nws = () => this.fromNws(p, date, placeLabel);
+      for (const source of usFirst ? [nws, msc] : [msc, nws]) {
         try {
           const o = await source();
           if (o?.kind === 'forecast') return o;
@@ -329,7 +337,19 @@ export class WeatherProvider {
   private async fromNws(p: LatLng, date: string, placeLabel: string): Promise<WeatherObservation | undefined> {
     const lat = p.lat.toFixed(4);
     const lng = p.lng.toFixed(4);
-    const point = await this.nwsFetch<{ properties: { forecast: string } }>(`${NWS}/points/${lat},${lng}`);
+    const cell = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
+    if (this.nwsNotCovered.has(cell)) return undefined;
+    let point: { properties: { forecast: string } };
+    try {
+      point = await this.nwsFetch<{ properties: { forecast: string } }>(`${NWS}/points/${lat},${lng}`);
+    } catch (e) {
+      if (e instanceof ProviderError && e.status === 404) {
+        if (this.nwsNotCovered.size > 5000) this.nwsNotCovered.clear();
+        this.nwsNotCovered.add(cell);
+        return undefined;
+      }
+      throw e;
+    }
     const fc = await this.nwsFetch<{
       properties: {
         periods: {

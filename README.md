@@ -112,6 +112,21 @@ How it is kept down:
 - One Places search per day; the traveller's interests take turns across days. Each search asks for 20 results (billed per request, not per result), and repeated searches in one plan are reused.
 - The model sees the top 8 candidates per day, and stop choice runs on the fast model when `BEDROCK_FAST_MODEL_ID` is set.
 
+## Checking a deployment
+
+```bash
+# End-to-end: sign up, plan a trip, share it, privacy and auth checks, then clean up.
+API=https://api.travlio.app/api npm run check:api
+# Add the docs login to also run the live integrations check.
+API=https://api.travlio.app/api DOCS_USERNAME=... DOCS_PASSWORD=... npm run check:api
+```
+
+`GET /api/health/integrations` (behind the docs login) makes one small real call to each outside service and
+reports `ok`, `fail` (with the reason) or `off` (not configured): database tables, Redis queue, Google Geocoding /
+Routes / Places, Bedrock, Environment Canada, NWS, MET Norway, NASA POWER, fuel prices, Ontario 511, travel
+advisories, Duffel and the Bank of Canada rate. Each run costs a few cents of Google and Bedrock usage.
+The end-to-end check leaves two `check-…@example.com` accounts and one feedback row behind; it deletes its trip.
+
 ## Endpoints
 
 ```

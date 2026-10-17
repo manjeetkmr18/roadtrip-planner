@@ -12,7 +12,8 @@
     "db:migrate": "node dist/db/migrate.js",
     "smoke": "bash scripts/smoke.sh",
     "infra:up": "docker compose up -d",
-    "infra:down": "docker compose down"
+    "infra:down": "docker compose down",
+    "check:api": "node scripts/api-check.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1149.0",

@@ -151,15 +151,18 @@ function same(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
+/** True when an Authorization header carries these Basic credentials (constant-time compare). */
+export function basicAuthOk(header: string | undefined, username: string, password: string): boolean {
+  if (!header?.startsWith('Basic ')) return false;
+  const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
+  const i = decoded.indexOf(':');
+  return i > 0 && same(decoded.slice(0, i), username) && same(decoded.slice(i + 1), password);
+}
+
 /** HTTP Basic auth for the docs only. */
 export function docsAuth(username: string, password: string) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const header = req.headers.authorization ?? '';
-    if (header.startsWith('Basic ')) {
-      const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
-      const i = decoded.indexOf(':');
-      if (i > 0 && same(decoded.slice(0, i), username) && same(decoded.slice(i + 1), password)) return next();
-    }
+    if (basicAuthOk(req.headers.authorization, username, password)) return next();
     res.setHeader('WWW-Authenticate', 'Basic realm="Travlio API docs", charset="UTF-8"');
     res.setHeader('Cache-Control', 'no-store');
     res.status(401).send('Authentication required');
