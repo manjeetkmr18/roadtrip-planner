@@ -4,12 +4,8 @@ import {
   dayOfWeek,
   isOntarioWeekendOrHoliday,
   ontarioStatutoryHolidays,
-  estimate407,
-  candidateRates,
-  is407EtrSection,
   energyCostLine,
   summarizeCosts,
-  unknownTollLine,
   convertLine,
   parkingCostLine,
   reviewDay,
@@ -44,32 +40,6 @@ describe('time', () => {
   });
 });
 
-describe('407 ETR', () => {
-  it('uses the weekday 7 a.m. peak rates', () => {
-    const rates = candidateRates('2026-10-14', 7 * 60 + 15, [7]);
-    expect(rates).toEqual([108.79]);
-  });
-  it('wraps early morning to the overnight rate', () => {
-    expect(candidateRates('2026-10-14', 3 * 60, [1])).toEqual([50.66]);
-  });
-  it('produces an ordered low / typical / high range with fees', () => {
-    const e = estimate407({ km: 20, date: '2026-10-14', entryMinutes: 7 * 60, hasTransponder: false });
-    expect(e.low).toBeLessThan(e.typical);
-    expect(e.typical).toBeLessThanOrEqual(e.high);
-    // low: cheapest zone at 7am = 62.30 c/km → 12.46 + $1 + $5.30
-    expect(e.low).toBeCloseTo(18.76, 2);
-  });
-  it('matches a published example within zone 7 with transponder', () => {
-    // 20 km in zone 7 entering 7am weekday: 20 * 1.0879 = 21.76 + $1 trip charge
-    const e = estimate407({ km: 20, date: '2026-10-14', entryMinutes: 7 * 60, hasTransponder: true, zones: [7] });
-    expect(e.low).toBeCloseTo(22.76, 2);
-  });
-  it('splits the private 407 ETR from the provincial section by longitude', () => {
-    expect(is407EtrSection(-79.5)).toBe(true);
-    expect(is407EtrSection(-78.9)).toBe(false);
-  });
-});
-
 describe('costs', () => {
   const at = '2026-10-12T00:00:00Z';
   it('computes fuel with consumption and price ranges', () => {
@@ -85,15 +55,15 @@ describe('costs', () => {
     expect(line.typical).toBe(126); // 80 * 1.05 * 1.5
     expect(line.high).toBeCloseTo(147.2, 2); // 80 * 1.15 * 1.6
   });
-  it('never counts unknown tolls as zero', () => {
+  it('never counts unknown amounts as zero', () => {
     const lines = [
-      { id: 'a', category: 'toll' as const, label: 'Bridge', low: 5, typical: 6, high: 8, currency: 'CAD' as const, confidence: 'provider_estimate' as const, mandatory: true, assumptions: [] },
-      unknownTollLine('b', 'Unpriced toll', 'CAD'),
+      { id: 'a', category: 'other' as const, label: 'Ferry', low: 5, typical: 6, high: 8, currency: 'CAD' as const, confidence: 'provider_estimate' as const, mandatory: true, assumptions: [] },
+      { id: 'b', category: 'rental' as const, label: 'One-way drop-off', low: null, typical: null, high: null, currency: 'CAD' as const, confidence: 'unknown' as const, mandatory: true, assumptions: [] },
       parkingCostLine({ id: 'p', urbanStops: 2, otherStops: 1, overnights: 1, currency: 'CAD', retrievedAt: at }),
     ];
     const s = summarizeCosts(lines, 'CAD');
     expect(s.unknownCount).toBe(1);
-    expect(s.unknownLabels).toEqual(['Unpriced toll']);
+    expect(s.unknownLabels).toEqual(['One-way drop-off']);
     expect(s.low).toBe(5);
     expect(s.typical).toBe(30);
     expect(s.high).toBe(8 + 50 + 8 + 30);
@@ -225,6 +195,8 @@ describe('TripRequest schema', () => {
   it('applies defaults and validates dates', () => {
     const r = TripRequest.parse({ origin: { address: 'Mississauga, ON' }, destination: { address: 'Calgary, AB' }, startDate: '2026-11-01', endDate: '2026-11-06' });
     expect(r.vehicle.fuelType).toBe('gasoline');
+    // Trips saved before tolls were removed still load.
+    expect(TripRequest.parse({ ...r, vehicle: { ...r.vehicle, has407Transponder: true, tollPasses: ['US_NY_EZPASSNY'] } }).vehicle.fuelType).toBe('gasoline');
     expect(r.preferences.maxDrivingHoursPerDay).toBe(6);
     expect(() => TripRequest.parse({ ...r, endDate: '2026-10-01' })).toThrow();
   });

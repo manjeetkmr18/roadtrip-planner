@@ -19,7 +19,7 @@ AUTH=(-H "authorization: Bearer $TOKEN" -H 'content-type: application/json')
 BODY=$(cat <<JSON
 {"origin":{"address":"$ORIGIN"},"destination":{"address":"$DEST"},"startDate":"$START","endDate":"$END",
  "departureTime":"07:30","roundTrip":true,
- "vehicle":{"fuelType":"gasoline","consumptionPer100km":8.5,"has407Transponder":false},
+ "vehicle":{"fuelType":"gasoline","consumptionPer100km":8.5},
  "preferences":{"pace":"balanced","maxDrivingHoursPerDay":6,"interests":["nature","history"]}}
 JSON
 )

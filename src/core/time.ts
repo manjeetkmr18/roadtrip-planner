@@ -67,7 +67,7 @@ function easterSunday(y: number): string {
   return iso(y, month, day);
 }
 
-/** Ontario statutory holidays (the 407 ETR applies weekend rates on these). */
+/** Ontario statutory holidays. */
 export function ontarioStatutoryHolidays(year: number): string[] {
   // Victoria Day: the Monday before May 25.
   const may24 = new Date(Date.UTC(year, 4, 24)).getUTCDay();

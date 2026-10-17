@@ -1,4 +1,4 @@
-import type { EnergyPriceRange, FuelType, LatLng } from '../core/index.js';
+import type { EnergyPriceRange, FuelType } from '../core/index.js';
 import { fetchJson, nowIso, ProviderContext, TtlCache } from './infra.js';
 
 // ---------------- Fuel and charging prices ----------------
@@ -86,66 +86,5 @@ export class FuelPriceProvider {
       note: live ? 'regional average; stations vary ±6–10%' : 'planning default, not a current price',
       source,
     };
-  }
-}
-
-// ---------------- TollGuru (toll cross-check / backup) ----------------
-
-export interface TollGuruRoute {
-  distanceMeters: number;
-  durationSeconds: number;
-  currency: string;
-  tag: number | null;
-  cash: number | null;
-  licensePlate: number | null;
-  min: number | null;
-  max: number | null;
-  hasTolls: boolean;
-}
-
-interface TollGuruResponse {
-  summary?: { currency?: string };
-  routes?: {
-    summary: { hasTolls: boolean; distance: { value: number }; duration: { value: number } };
-    costs: Record<string, number | false | null | undefined>;
-  }[];
-}
-
-const num = (v: number | false | null | undefined) => (typeof v === 'number' ? v : null);
-
-export class TollGuruProvider {
-  constructor(private readonly key?: string) {}
-  get enabled() {
-    return !!this.key;
-  }
-
-  async routes(from: LatLng, to: LatLng, waypoints: LatLng[], departureIso: string, ctx: ProviderContext): Promise<TollGuruRoute[]> {
-    if (!this.key) return [];
-    const res = await fetchJson<TollGuruResponse>('TollGuru', 'https://apis.tollguru.com/toll/v2/origin-destination-waypoints', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': this.key },
-      body: JSON.stringify({
-        from: { lat: from.lat, lng: from.lng },
-        to: { lat: to.lat, lng: to.lng },
-        waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lng })),
-        serviceProvider: 'here',
-        vehicle: { type: '2AxlesAuto' },
-        departureTime: departureIso,
-      }),
-      timeoutMs: 25_000,
-    });
-    ctx.record('tollguru');
-    const currency = res.summary?.currency ?? 'USD';
-    return (res.routes ?? []).map((r) => ({
-      distanceMeters: r.summary.distance.value,
-      durationSeconds: r.summary.duration.value,
-      currency,
-      tag: num(r.costs.tag),
-      cash: num(r.costs.cash),
-      licensePlate: num(r.costs.licensePlate),
-      min: num(r.costs.minimumTollCost),
-      max: num(r.costs.maximumTollCost),
-      hasTolls: r.summary.hasTolls,
-    }));
   }
 }

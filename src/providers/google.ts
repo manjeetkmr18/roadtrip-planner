@@ -4,13 +4,10 @@ import {
   haversineMeters,
   pointAlong,
   samplePoints,
-  ETR407_EAST_END_LNG,
-  ETR407_WEST_END_LNG,
   type LatLng,
   type OpeningPeriod,
   type PlaceInput,
   type RouteStep,
-  type FuelType,
 } from '../core/index.js';
 import { fetchJson, nowIso, ProviderContext } from './infra.js';
 import { findSamplePlace, nearestSamplePlace } from './sample-data.js';
@@ -112,8 +109,6 @@ export interface RawRoute {
   durationSeconds: number;
   polyline: string;
   steps: RouteStep[];
-  /** null = provider reports no tolls; known=false = tolls exist but unpriced. */
-  toll: { known: boolean; prices: { currency: string; amount: number }[] } | null;
   description?: string;
   sample: boolean;
 }
@@ -125,8 +120,6 @@ export interface RouteQuery {
   departureIso: string;
   alternatives: boolean;
   avoidFerries?: boolean;
-  tollPasses: string[];
-  fuelType: FuelType;
 }
 
 interface GoogleRoutesResponse {
@@ -135,7 +128,6 @@ interface GoogleRoutesResponse {
     duration?: string;
     description?: string;
     polyline?: { encodedPolyline: string };
-    travelAdvisory?: { tollInfo?: { estimatedPrice?: { currencyCode: string; units?: string; nanos?: number }[] } };
     legs?: {
       steps?: {
         distanceMeters?: number;
@@ -152,8 +144,6 @@ interface GoogleRoutesResponse {
 const secs = (d?: string) => (d ? Number(d.replace('s', '')) : 0);
 const ll = (p?: { latLng: { latitude: number; longitude: number } }) => (p ? { lat: p.latLng.latitude, lng: p.latLng.longitude } : undefined);
 
-const EMISSION: Record<FuelType, string> = { gasoline: 'GASOLINE', diesel: 'DIESEL', hybrid: 'HYBRID', electric: 'ELECTRIC' };
-
 export class RoutesProvider {
   constructor(private readonly key?: string) {}
 
@@ -168,12 +158,8 @@ export class RoutesProvider {
       routingPreference: 'TRAFFIC_UNAWARE',
       departureTime: Date.parse(q.departureIso) > Date.now() ? q.departureIso : undefined,
       computeAlternativeRoutes: q.alternatives && q.waypoints.length === 0,
-      extraComputations: ['TOLLS'],
-      routeModifiers: {
-        avoidFerries: q.avoidFerries || undefined,
-        vehicleInfo: { emissionType: EMISSION[q.fuelType] },
-        tollPasses: q.tollPasses.length ? q.tollPasses : undefined,
-      },
+      // No toll prices (Travlio doesn't price tolls), which keeps requests out of the toll SKU.
+      routeModifiers: { avoidFerries: q.avoidFerries || undefined },
       languageCode: 'en-CA',
       units: 'METRIC',
     };
@@ -182,7 +168,6 @@ export class RoutesProvider {
       'routes.duration',
       'routes.description',
       'routes.polyline.encodedPolyline',
-      'routes.travelAdvisory.tollInfo',
       'routes.legs.steps.distanceMeters',
       'routes.legs.steps.staticDuration',
       'routes.legs.steps.polyline.encodedPolyline',
@@ -196,13 +181,8 @@ export class RoutesProvider {
       body: JSON.stringify(body),
       timeoutMs: 25_000,
     });
-    ctx.record('routesWithTolls');
+    ctx.record('routesEssentials');
     return (res.routes ?? []).map((r) => {
-      const tollInfo = r.travelAdvisory?.tollInfo;
-      const prices = (tollInfo?.estimatedPrice ?? []).map((p) => ({
-        currency: p.currencyCode,
-        amount: Number(p.units ?? 0) + (p.nanos ?? 0) / 1e9,
-      }));
       return {
         distanceMeters: r.distanceMeters ?? 0,
         durationSeconds: secs(r.duration),
@@ -219,7 +199,6 @@ export class RoutesProvider {
             roads: [],
           })),
         ),
-        toll: tollInfo ? { known: prices.length > 0, prices } : null,
         sample: false,
       };
     });
@@ -227,8 +206,7 @@ export class RoutesProvider {
 
   /**
    * Sample route: straight segments through the waypoints with a road-distance factor,
-   * cut into ~50 km steps. Steps through the GTA 407 corridor are labelled "Highway 407"
-   * so the 407 calculator can be exercised without a key.
+   * cut into ~50 km steps.
    */
   private sampleRoute(q: RouteQuery, ctx: ProviderContext): RawRoute {
     ctx.sample('Routes are approximate sample geometry (no GOOGLE_MAPS_API_KEY).');
@@ -254,16 +232,14 @@ export class RoutesProvider {
         d += haversineMeters(dense[j], dense[j + 1]) * roadFactor;
         chunk.push(dense[++j]);
       }
-      const mid = chunk[Math.floor(chunk.length / 2)];
-      const in407 = mid.lat > 43.55 && mid.lat < 43.95 && mid.lng > ETR407_WEST_END_LNG && mid.lng < ETR407_EAST_END_LNG;
       steps.push({
         distanceMeters: Math.round(d),
         durationSeconds: Math.round((d / 1000 / kmh) * 3600),
-        instruction: in407 ? 'Continue on Highway 407 ETR (sample)' : 'Continue on highway (sample route)',
+        instruction: 'Continue on highway (sample route)',
         polyline: encodePolyline(chunk),
         startLocation: chunk[0],
         endLocation: chunk[chunk.length - 1],
-        roads: in407 ? ['407'] : [],
+        roads: [],
       });
       i = j;
     }
@@ -272,7 +248,6 @@ export class RoutesProvider {
       durationSeconds: steps.reduce((s, x) => s + x.durationSeconds, 0),
       polyline: encodePolyline(dense),
       steps,
-      toll: null,
       description: 'Sample route',
       sample: true,
     };

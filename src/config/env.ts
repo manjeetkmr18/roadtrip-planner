@@ -27,7 +27,6 @@ export const EnvSchema = z.object({
   PROVIDER_MODE: z.enum(['auto', 'sample']).default('auto'),
 
   GOOGLE_MAPS_API_KEY: optional,
-  TOLLGURU_API_KEY: optional,
   /** Duffel flight search (fly + drive). Without it, flights are sample data. */
   DUFFEL_ACCESS_TOKEN: optional,
 
@@ -42,7 +41,7 @@ export const EnvSchema = z.object({
   /** api.weather.gov requires an identifying User-Agent with contact details. */
   NWS_USER_AGENT: z.string().default('travlio (dev@example.com)'),
 
-  /** Used only to convert USD tolls/fuel into CAD; shown as approximate. */
+  /** Fallback USD→CAD rate when the Bank of Canada feed can't be reached. */
   USD_CAD_RATE: z.coerce.number().positive().default(1.38),
   /** Google Places searches per trip day (1 = interests take turns across days). */
   PLACES_SEARCHES_PER_DAY: z.coerce.number().int().min(1).max(4).default(1),

@@ -3,7 +3,7 @@ import { z } from 'zod';
 /** How much a number can be trusted. Shown next to every cost and fact in the UI. */
 export const Confidence = z.enum([
   'verified', // official published rate applied exactly
-  'provider_estimate', // a provider's computed estimate (e.g. Google tolls)
+  'provider_estimate', // a provider's computed estimate (e.g. a flight fare at search time)
   'approximate', // our own calculation with stated assumptions
   'unknown', // we know a cost exists but not its amount
 ]);
@@ -42,9 +42,10 @@ export const VehicleInput = z.object({
   fuelType: FuelType.default('gasoline'),
   /** L/100km for fuel vehicles, kWh/100km for EVs. */
   consumptionPer100km: z.number().positive().max(60).default(8.5),
-  has407Transponder: z.boolean().default(false),
-  /** Google Routes TollPass enum values the driver holds, e.g. US_NY_EZPASSNY. */
-  tollPasses: z.array(z.string()).default([]),
+  /** Legacy (trips saved before tolls were removed); ignored. */
+  has407Transponder: z.boolean().optional(),
+  /** Legacy (trips saved before tolls were removed); ignored. */
+  tollPasses: z.array(z.string()).optional(),
 });
 export type VehicleInput = z.infer<typeof VehicleInput>;
 
@@ -137,8 +138,6 @@ export const TripRequest = z
     vehicle: VehicleInput.default({
       fuelType: 'gasoline',
       consumptionPer100km: 8.5,
-      has407Transponder: false,
-      tollPasses: [],
     }),
     preferences: PreferencesInput.default({
       pace: 'balanced',
@@ -158,6 +157,7 @@ export type TripRequestInput = z.input<typeof TripRequest>;
 
 // ---------- Plan output ----------
 
+/** 'toll' and 'etr407' only appear in plans saved before tolls were removed from Travlio. */
 export const CostCategory = z.enum(['toll', 'etr407', 'fuel', 'charging', 'parking', 'border', 'flight', 'rental', 'other']);
 export type CostCategory = z.infer<typeof CostCategory>;
 
@@ -202,7 +202,7 @@ export const RouteStep = z.object({
   endLocation: LatLng.optional(),
   /** Encoded polyline of this step, used to place overnight stops mid-step. */
   polyline: z.string().optional(),
-  /** Road names mentioned in the instruction, used to detect toll roads like 407 ETR. */
+  /** Road names mentioned in the instruction. */
   roads: z.array(z.string()).default([]),
 });
 export type RouteStep = z.infer<typeof RouteStep>;
@@ -214,7 +214,8 @@ export const RouteOption = z.object({
   distanceMeters: z.number(),
   durationSeconds: z.number(),
   polyline: z.string().optional(),
-  hasTolls: z.boolean(),
+  /** Legacy (plans saved before tolls were removed). */
+  hasTolls: z.boolean().optional(),
   costs: z.array(CostLine),
   summary: CostSummary,
   source: SourceRef,

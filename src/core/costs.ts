@@ -131,20 +131,3 @@ export function summarizeCosts(lines: CostLine[], currency: Currency): CostSumma
     spreadDrivers: spreadDrivers.filter((d) => d.spread > 0).slice(0, 3),
   };
 }
-
-/** A toll the provider knows exists but cannot price. */
-export function unknownTollLine(id: string, label: string, currency: Currency, source?: SourceRef): CostLine {
-  return {
-    id,
-    category: 'toll',
-    label,
-    low: null,
-    typical: null,
-    high: null,
-    currency,
-    confidence: 'unknown',
-    mandatory: true,
-    assumptions: ['A toll exists on this route but its price is not available. Budget extra and check with the operator.'],
-    source,
-  };
-}

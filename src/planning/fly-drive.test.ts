@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TripRequest, type WeatherObservation } from '../core/index.js';
 import { FlightsProvider } from '../providers/flights.js';
 import { GeocodingProvider, PlacesProvider, RoutesProvider } from '../providers/google.js';
-import { FuelPriceProvider, TollGuruProvider } from '../providers/costs-data.js';
+import { FuelPriceProvider } from '../providers/costs-data.js';
 import { Ontario511Provider } from '../providers/open-data.js';
 import { nearestAirports } from '../providers/airports.js';
 import type { Providers } from '../providers/providers.module.js';
@@ -17,7 +17,6 @@ const providers = {
   roads: new Ontario511Provider(),
   advisories: { forCountries: async () => [] },
   fuel: new FuelPriceProvider(),
-  tollguru: new TollGuruProvider(),
   llm: { enabled: false, complete: async () => '' },
   flights: new FlightsProvider(),
 } as unknown as Providers;

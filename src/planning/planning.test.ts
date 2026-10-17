@@ -1,12 +1,12 @@
 import { FlightsProvider } from '../providers/flights.js';
 import { describe, expect, it } from 'vitest';
 import { encodePolyline, TripRequest, type RouteStep, type WeatherObservation } from '../core/index.js';
-import { find407, legCostLines } from './route-costs.js';
+import { legCostLines } from './route-costs.js';
 import { TripPlanner, localIso } from './planner.js';
 import { interestQueries, rankCandidates, chooseStops } from './stops.js';
 import { ProviderContext } from '../providers/infra.js';
 import { GeocodingProvider, PlacesProvider, RoutesProvider, type RawRoute } from '../providers/google.js';
-import { FuelPriceProvider, TollGuruProvider, type TollGuruRoute } from '../providers/costs-data.js';
+import { FuelPriceProvider } from '../providers/costs-data.js';
 import { AdvisoryProvider, Ontario511Provider } from '../providers/open-data.js';
 import type { Providers } from '../providers/providers.module.js';
 import type { Llm } from '../providers/llm.js';
@@ -29,14 +29,6 @@ class FakeAdvisories {
     return c.includes('US') ? [{ countryCode: 'US', country: 'United States', level: 0, text: 'Exercise normal security precautions', updatedAt: '2026-10-10', url: 'https://travel.gc.ca/destinations/united-states', issuedBy: 'GAC' }] : [];
   }
 }
-class FakeTollGuru extends TollGuruProvider {
-  constructor(private readonly result: TollGuruRoute[]) {
-    super('test-key');
-  }
-  override async routes(): Promise<TollGuruRoute[]> {
-    return this.result;
-  }
-}
 const noLlm: Llm = { enabled: false, complete: async () => '' };
 
 function providers(over: Partial<Record<keyof Providers, unknown>> = {}): Providers {
@@ -48,108 +40,21 @@ function providers(over: Partial<Record<keyof Providers, unknown>> = {}): Provid
     roads: new Ontario511Provider(),
     advisories: new FakeAdvisories(),
     fuel: new FuelPriceProvider(),
-    tollguru: new TollGuruProvider(),
     llm: noLlm,
     flights: new FlightsProvider(),
     ...over,
   } as unknown as Providers;
 }
 
-describe('find407', () => {
-  it('splits a step that crosses Brock Road into ETR and provincial kilometres', () => {
-    const step: RouteStep = {
-      distanceMeters: 40_000,
-      durationSeconds: 1500,
-      instruction: 'Continue onto ON-407 E',
-      polyline: encodePolyline([
-        { lat: 43.86, lng: -79.3 },
-        { lat: 43.87, lng: -79.09 },
-        { lat: 43.9, lng: -78.85 },
-      ]),
-      roads: [],
-    };
-    const r = find407([{ distanceMeters: 5000, durationSeconds: 300, instruction: 'Head north', roads: [] }, step]);
-    expect(r.etrKm).toBeGreaterThan(15);
-    expect(r.provincial407Km).toBeGreaterThan(15);
-    expect(r.etrKm + r.provincial407Km).toBeCloseTo(40, 5);
-    expect(r.etrTrips).toBe(1);
-    expect(r.etrEntryOffsetSeconds).toBe(300);
-  });
-  it('ignores routes without the 407', () => {
-    expect(find407([{ distanceMeters: 1000, durationSeconds: 60, instruction: 'Merge onto ON-401 E', roads: [] }]).etrKm).toBe(0);
-  });
-});
-
 describe('legCostLines', () => {
   const place = (label: string, lat: number, lng: number, country = 'CA') => ({ label, location: { lat, lng }, country, region: country === 'CA' ? 'ON' : 'NY' });
-  const raw = (toll: RawRoute['toll'], steps: RouteStep[] = []): RawRoute => ({
-    distanceMeters: 100_000,
-    durationSeconds: 4000,
-    polyline: '',
-    steps,
-    toll,
-    sample: false,
-  });
-  const base = {
-    idPrefix: 'fastest-out',
-    labelPrefix: '',
-    date: '2026-10-14',
-    departureMinutes: 7 * 60,
-    departureIso: '2026-10-14T07:00:00-04:00',
-    from: place('Toronto, ON', 43.65, -79.38),
-    to: place('Buffalo, NY', 42.88, -78.87, 'US'),
-    waypoints: [],
-    useTollGuru: false,
-  };
+  const raw: RawRoute = { distanceMeters: 100_000, durationSeconds: 4000, polyline: '', steps: [], sample: false };
+  const base = { idPrefix: 'fastest-out', labelPrefix: '', date: '2026-10-14', from: place('Toronto, ON', 43.65, -79.38), to: place('Buffalo, NY', 42.88, -78.87, 'US'), raw };
 
-  it('converts Google USD tolls to CAD and keeps unknown tolls unknown', async () => {
-    const ctx = new ProviderContext();
-    const lines = await legCostLines({ ...base, raw: raw({ known: true, prices: [{ currency: 'USD', amount: 5 }] }) }, req, providers(), ctx, 1.4);
-    const toll = lines.find((l) => l.category === 'toll')!;
-    expect(toll.currency).toBe('CAD');
-    expect(toll.typical).toBe(7);
-    const unknown = await legCostLines({ ...base, raw: raw({ known: false, prices: [] }) }, req, providers(), ctx, 1.4);
-    expect(unknown.find((l) => l.category === 'toll')!.typical).toBeNull();
-    const fuel = lines.find((l) => l.category === 'fuel')!;
-    expect(fuel.assumptions.join(' ')).toMatch(/border/);
-  });
-
-  it('lets a matching TollGuru route replace Google and 407 toll lines (no double counting)', async () => {
-    const steps: RouteStep[] = [
-      { distanceMeters: 30_000, durationSeconds: 1200, instruction: 'Take ON-407', polyline: encodePolyline([{ lat: 43.8, lng: -79.6 }, { lat: 43.85, lng: -79.4 }]), roads: [] },
-    ];
-    const tg = new FakeTollGuru([{ distanceMeters: 102_000, durationSeconds: 4100, currency: 'CAD', tag: 20, cash: null, licensePlate: 31, min: 20, max: 31, hasTolls: true }]);
-    const lines = await legCostLines({ ...base, useTollGuru: true, raw: raw({ known: false, prices: [] }, steps) }, req, providers({ tollguru: tg }), new ProviderContext(), 1.4);
-    const tolls = lines.filter((l) => l.category === 'toll' || l.category === 'etr407');
-    expect(tolls).toHaveLength(1);
-    expect(tolls[0].label).toMatch(/TollGuru/);
-    expect(tolls[0].typical).toBe(31); // no transponder → licence-plate billing
-    expect(tolls[0].assumptions.join(' ')).toMatch(/Our own 407 ETR check/);
-  });
-
-  it('skips the monthly 407 account fee when told it was already counted', async () => {
-    const steps: RouteStep[] = [{ distanceMeters: 30_000, durationSeconds: 1200, instruction: 'Take ON-407', polyline: encodePolyline([{ lat: 43.8, lng: -79.6 }, { lat: 43.85, lng: -79.4 }]), roads: [] }];
-    const a = await legCostLines({ ...base, raw: raw(null, steps) }, req, providers(), new ProviderContext(), 1.4);
-    const b = await legCostLines({ ...base, chargeEtrAccountFee: false, raw: raw(null, steps) }, req, providers(), new ProviderContext(), 1.4);
-    const ea = a.find((l) => l.category === 'etr407')!;
-    const eb = b.find((l) => l.category === 'etr407')!;
-    expect(ea.typical! - eb.typical!).toBeCloseTo(5, 2);
-  });
-
-  it('charges nothing for Highway 407 East (toll-free since June 1, 2025)', async () => {
-    const steps: RouteStep[] = [
-      {
-        distanceMeters: 40_000,
-        durationSeconds: 1500,
-        instruction: 'Continue onto ON-407 E',
-        polyline: encodePolyline([{ lat: 43.86, lng: -79.3 }, { lat: 43.87, lng: -79.09 }, { lat: 43.9, lng: -78.85 }]),
-        roads: [],
-      },
-    ];
-    const lines = await legCostLines({ ...base, raw: raw(null, steps) }, req, providers(), new ProviderContext(), 1.4);
-    expect(lines.filter((l) => l.typical == null)).toHaveLength(0);
-    const etr = lines.find((l) => l.category === 'etr407')!;
-    expect(etr.assumptions.join(' ')).toMatch(/407 East .* toll-free since June 1, 2025/);
+  it('prices a leg by its fuel only: no tolls', async () => {
+    const lines = await legCostLines(base, req, providers(), new ProviderContext(), 1.4);
+    expect(lines.map((l) => l.category)).toEqual(['fuel']);
+    expect(lines[0].assumptions.join(' ')).toMatch(/border/);
   });
 });
 
@@ -255,10 +160,7 @@ describe('TripPlanner (sample mode)', () => {
     const sel = plan.routes.find((r) => r.id === plan.selectedRouteId)!;
     expect(sel.summary.low).toBeLessThanOrEqual(sel.summary.typical);
     expect(sel.summary.typical).toBeLessThanOrEqual(sel.summary.high);
-    expect(sel.costs.some((c) => c.category === 'etr407')).toBe(true);
-    // 407 monthly account fee counted once across the trip
-    const etr = sel.costs.filter((c) => c.category === 'etr407');
-    expect(etr.filter((c) => c.assumptions.join(' ').includes('monthly account fee counted on another leg')).length).toBe(etr.length - 1);
+    expect(sel.costs.some((c) => c.category === 'toll' || c.category === 'etr407')).toBe(false);
     expect(plan.days.every((d) => d.weather?.rating === 'mixed')).toBe(true);
     expect(plan.days.flatMap((d) => d.stops).every((s) => s.kind === 'overnight' || s.arrivalTime)).toBe(true);
   });

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GeocodingProvider, PlacesProvider, RoutesProvider, toOpeningPeriods } from './google.js';
 import { ProviderContext } from './infra.js';
-import { TollGuruProvider } from './costs-data.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -16,7 +15,7 @@ function stubFetch(body: unknown, capture?: (url: string, init: RequestInit) => 
 }
 
 describe('Google Routes adapter', () => {
-  it('parses distance, steps, polylines and toll prices, and requests tolls', async () => {
+  it('parses distance, steps and polylines, and never asks for toll prices', async () => {
     let sent: { url: string; body: Record<string, unknown>; mask: string } | undefined;
     stubFetch(
       {
@@ -25,7 +24,6 @@ describe('Google Routes adapter', () => {
             distanceMeters: 450000,
             duration: '16200s',
             polyline: { encodedPolyline: '_p~iF~ps|U_ulLnnqC' },
-            travelAdvisory: { tollInfo: { estimatedPrice: [{ currencyCode: 'USD', units: '12', nanos: 500000000 }] } },
             legs: [
               {
                 steps: [
@@ -35,7 +33,7 @@ describe('Google Routes adapter', () => {
                     polyline: { encodedPolyline: '_p~iF~ps|U' },
                     startLocation: { latLng: { latitude: 43.8, longitude: -79.6 } },
                     endLocation: { latLng: { latitude: 43.85, longitude: -79.4 } },
-                    navigationInstruction: { instructions: 'Take ON-407 ETR' },
+                    navigationInstruction: { instructions: 'Take ON-401 E' },
                   },
                 ],
               },
@@ -50,18 +48,16 @@ describe('Google Routes adapter', () => {
     );
     const ctx = new ProviderContext();
     const routes = await new RoutesProvider('k').compute(
-      { origin: { lat: 43.6, lng: -79.6 }, destination: { lat: 45.4, lng: -75.7 }, waypoints: [], departureIso: '2099-01-01T08:00:00-05:00', alternatives: true, tollPasses: [], fuelType: 'hybrid' },
+      { origin: { lat: 43.6, lng: -79.6 }, destination: { lat: 45.4, lng: -75.7 }, waypoints: [], departureIso: '2099-01-01T08:00:00-05:00', alternatives: true },
       ctx,
     );
-    expect(sent!.body.extraComputations).toEqual(['TOLLS']);
-    expect((sent!.body.routeModifiers as { vehicleInfo: { emissionType: string } }).vehicleInfo.emissionType).toBe('HYBRID');
-    expect(sent!.mask).toContain('routes.travelAdvisory.tollInfo');
+    expect(sent!.body.extraComputations).toBeUndefined();
+    expect(sent!.body.routeModifiers).not.toHaveProperty('tollPasses');
+    expect(sent!.mask).not.toContain('tollInfo');
     expect(routes).toHaveLength(2);
     expect(routes[0].durationSeconds).toBe(16200);
-    expect(routes[0].toll).toEqual({ known: true, prices: [{ currency: 'USD', amount: 12.5 }] });
-    expect(routes[0].steps[0]).toMatchObject({ durationSeconds: 1200, instruction: 'Take ON-407 ETR', startLocation: { lat: 43.8, lng: -79.6 } });
-    expect(routes[1].toll).toBeNull();
-    expect(ctx.calls.routesWithTolls).toBe(1);
+    expect(routes[0].steps[0]).toMatchObject({ durationSeconds: 1200, instruction: 'Take ON-401 E', startLocation: { lat: 43.8, lng: -79.6 } });
+    expect(ctx.calls.routesEssentials).toBe(1);
     expect(ctx.costUsd).toBeGreaterThan(0);
   });
 });
@@ -124,21 +120,5 @@ describe('Google Geocoding adapter', () => {
     const r = await new GeocodingProvider().resolve({ address: 'Calgary, AB' }, ctx);
     expect(r.region).toBe('AB');
     expect(ctx.usedSampleData).toBe(true);
-  });
-});
-
-describe('TollGuru adapter', () => {
-  it('maps cost fields and treats false as unavailable', async () => {
-    let headers = new Headers();
-    stubFetch(
-      {
-        summary: { currency: 'CAD' },
-        routes: [{ summary: { hasTolls: true, distance: { value: 100000 }, duration: { value: 4000 } }, costs: { tag: 20.5, cash: false, licensePlate: 27, minimumTollCost: 20.5, maximumTollCost: 27 } }],
-      },
-      (_u, init) => (headers = new Headers(init.headers)),
-    );
-    const [r] = await new TollGuruProvider('secret').routes({ lat: 1, lng: 2 }, { lat: 3, lng: 4 }, [], '2026-10-14T08:00:00-04:00', new ProviderContext());
-    expect(headers.get('x-api-key')).toBe('secret');
-    expect(r).toMatchObject({ currency: 'CAD', tag: 20.5, cash: null, licensePlate: 27, max: 27 });
   });
 });

@@ -52,11 +52,8 @@ export async function fetchJson<T>(
 export const PRICING_USD = {
   geocoding: 5 / 1000,
   routesEssentials: 5 / 1000,
-  /** Toll calculation puts a request in Compute Routes Enterprise (Google SKU details). */
-  routesWithTolls: 15 / 1000,
   /** Text Search with opening hours + rating fields is billed as Enterprise. Verify. */
   placesTextSearchEnterprise: 35 / 1000,
-  tollguru: 80 / 5000,
 } as const;
 
 /** Per-token model prices, read lazily so .env is loaded first. Defaults match Claude Sonnet-class pricing. */

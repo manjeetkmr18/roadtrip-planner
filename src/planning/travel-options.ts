@@ -50,8 +50,6 @@ export async function travelOptions(q: TravelOptionsQuery, p: Providers, ctx = n
           waypoints: [],
           departureIso: localIso(q.startDate, '08:00', timeZoneAt(origin)),
           alternatives: false,
-          tollPasses: [],
-          fuelType: 'gasoline',
         },
         ctx,
       );

@@ -162,7 +162,7 @@ export function flyDriveIssues(req: TripRequest, days: DayPlan[]): Issue[] {
     issues.push({ severity: 'info', code: 'DRIVING_ABROAD', message: `Driving in ${out.to.country}: check whether you need an International Driving Permit, and the local road rules.` });
   }
   if (!['CA', 'US'].includes(out.to.country)) {
-    issues.push({ severity: 'info', code: 'OUTSIDE_NORTH_AMERICA', message: 'Fuel prices, tolls and road notices are checked for Canada and the US only, so costs here are rougher.' });
+    issues.push({ severity: 'info', code: 'OUTSIDE_NORTH_AMERICA', message: 'Fuel prices and road notices are checked for Canada and the US only, so costs here are rougher.' });
   }
   const ret = t.return;
   if (ret) {

@@ -8,7 +8,6 @@ import {
   drivingDaysNeeded,
   encodePolyline,
   fractionAlong,
-  parseHHMM,
   reviewDay,
   bestOutdoorDay,
   scheduleDay,
@@ -114,8 +113,6 @@ export class TripPlanner {
       destination: to.location,
       waypoints: via.map((w) => w.location),
       departureIso,
-      tollPasses: req.vehicle.tollPasses,
-      fuelType: req.vehicle.fuelType,
       avoidFerries: req.preferences.avoidFerries,
     };
     const routes = await this.providers.routes.compute({ ...base, alternatives: true }, ctx);
@@ -141,7 +138,6 @@ export class TripPlanner {
     const tz = timeZoneFor(origin);
     const firstDeparture = road.firstDayDeparture ?? req.departureTime;
     const departureIso = localIso(req.startDate, firstDeparture, tz);
-    const departureMinutes = parseHHMM(firstDeparture);
     const totalDays = daysBetween(req.startDate, req.endDate) + 1;
     const travelLines = flyDriveCosts(input, totalDays, usdToCad);
 
@@ -161,9 +157,8 @@ export class TripPlanner {
     const legLinesByKind = new Map<RouteKind, CostLine[]>();
     for (const k of kinds) {
       if (!k.outRoute) continue;
-      const common = { date: req.startDate, departureMinutes, departureIso, useTollGuru: k.kind === 'fastest' };
       const lines = await legCostLines(
-        { ...common, idPrefix: `${k.kind}-out`, labelPrefix: req.roundTrip ? 'Outbound: ' : '', raw: k.outRoute, from: origin, to: destination, waypoints },
+        { date: req.startDate, idPrefix: `${k.kind}-out`, labelPrefix: req.roundTrip ? 'Outbound: ' : '', raw: k.outRoute, from: origin, to: destination },
         req,
         p,
         ctx,
@@ -172,18 +167,7 @@ export class TripPlanner {
       if (k.retRoute) {
         lines.push(
           ...(await legCostLines(
-            {
-              ...common,
-              date: req.endDate,
-              departureIso: localIso(req.endDate, req.departureTime, timeZoneFor(destination)),
-              idPrefix: `${k.kind}-ret`,
-              labelPrefix: 'Return: ',
-              raw: k.retRoute,
-              from: destination,
-              to: origin,
-              waypoints: [...waypoints].reverse(),
-              chargeEtrAccountFee: !(lines.some((l) => l.category === 'etr407') && req.startDate.slice(0, 7) === req.endDate.slice(0, 7)),
-            },
+            { date: req.endDate, idPrefix: `${k.kind}-ret`, labelPrefix: 'Return: ', raw: k.retRoute, from: destination, to: origin },
             req,
             p,
             ctx,
@@ -206,7 +190,6 @@ export class TripPlanner {
         distanceMeters: distance,
         durationSeconds: duration,
         polyline: k.outRoute.polyline,
-        hasTolls: allLines.some((l) => l.category === 'toll' || l.category === 'etr407'),
         costs: allLines,
         summary: summarizeCosts(allLines, req.currency),
         source: k.outRoute.sample

@@ -1,6 +1,6 @@
 # Travlio — Backend API
 
-NestJS API that plans Canada / cross-border road trips: routes, an itemised **low / typical / high** trip cost (tolls, the 407 ETR, fuel or charging, parking), a weather review for every driving day, realistic driving days, and stops checked against opening hours.
+NestJS API that plans Canada / cross-border road trips: routes, an itemised **low / typical / high** trip cost (fuel or charging, parking, and flights + rental car for fly + drive), a weather review for every driving day, realistic driving days, and stops checked against opening hours.
 
 The app is a separate repo: **[roadtrip-planner-app](https://github.com/manjeetkmr18/roadtrip-planner-app)**. It's a single Expo (React Native) codebase for iOS, Android and web, and it talks to this API over HTTP.
 
@@ -38,10 +38,10 @@ npm run smoke
 ```
 src/
   core/        Trip logic, no I/O, fully unit-tested
-               407 ETR rates, cost scenarios, fuel, weather review,
+               cost scenarios, fuel, weather review,
                day splitting, scheduling, feasibility checks, types
   providers/   External APIs
-               Google (geocoding, routes, places), TollGuru, Bedrock,
+               Google (geocoding, routes, places), Duffel flights, Bedrock,
                Environment Canada + NWS weather, Ontario 511, travel advisories, fuel prices
   planning/    The trip planner that ties it together (planner.ts), cost lines per route, stop selection
   trips/       Trips API, BullMQ queue + worker, sharing
@@ -54,13 +54,10 @@ src/
 ## How a plan is made
 
 1. **Find the places.** Geocode the origin, destination and any stops (Google).
-2. **Get the routes.** The fastest route and an alternative, with toll prices (Google Routes). Round trips also get a return leg.
-3. **Cost each route.**
-   - The **407 ETR** uses our own calculator from the published 2026 rates, since Google can't price it.
-   - Other tolls come from Google.
-   - **TollGuru** cross-checks tolls without double counting.
-   - Fuel and parking are estimated.
-   - Unknown tolls are listed, never counted as $0.
+2. **Get the routes.** The fastest route and an alternative (Google Routes). Round trips also get a return leg.
+3. **Cost each route.** Fuel or charging and parking are estimated; fly + drive adds the flights and a rental car.
+   Travlio doesn't price tolls: travellers plan the route they want, so tolls aren't part of the plan.
+   Unknown amounts are listed, never counted as $0.
 4. **Split into driving days.** Days are even and stay within the user's daily limit; overnight areas are named.
 5. **Check the weather for each day**, where the day starts, en route, at stops you added and where it ends:
    - Canada and the US: Environment Canada / the US National Weather Service, with official alerts.
@@ -87,8 +84,7 @@ Travlio does not book flights; each flight links to the same search on Google Fl
 
 | Variable | Used for | Notes |
 |---|---|---|
-| `GOOGLE_MAPS_API_KEY` | Geocoding, Routes (tolls), Places (New) | Server key, restrict by API + IP |
-| `TOLLGURU_API_KEY` | Toll cross-check / Canada tolls | Optional |
+| `GOOGLE_MAPS_API_KEY` | Geocoding, Routes, Places (New) | Server key, restrict by API + IP |
 | `DUFFEL_ACCESS_TOKEN` | Real flights for fly + drive | Optional; searching is free. Without it, flights are sample data |
 | `AWS_REGION`, `BEDROCK_MODEL_ID` + AWS credentials | Stop choice and day descriptions | Model must be enabled in Bedrock |
 | `ONTARIO_511_API_KEY` | Road closures | Free key from 511on.ca |
@@ -98,22 +94,21 @@ Weather (Environment Canada, NWS, MET Norway, NASA POWER) and travel advisories 
 
 ### Things to verify with your accounts
 
-- **Google pricing:** the cost meter in `src/providers/infra.ts` uses list prices: Compute Routes Enterprise (toll prices) $15/1k, Essentials $5/1k, Places Text Search Enterprise (rating + opening hours) $35/1k. It ignores free monthly allowances and volume discounts, so it reads high. Confirm in your billing console.
-- **407 ETR rates:** stored in `src/core/etr407.ts`. Update them every January.
+- **Google pricing:** the cost meter in `src/providers/infra.ts` uses list prices: Compute Routes Essentials $5/1k (no toll prices are requested; check whether alternative routes bill as Pro on your account), Places Text Search Enterprise (rating + opening hours) $35/1k. It ignores free monthly allowances and volume discounts, so it reads high. Confirm in your billing console.
 
 ## Running costs per trip plan
 
-What one typical plan (3-day round trip, one added stop, tolls on the way) asks for:
+What one typical plan (3-day round trip, one added stop) asks for:
 
 | Call | SKU | Per plan |
 |---|---|---|
 | Find places | Geocoding | ~3 |
-| Routes with toll prices, main + alternative in one request (out + back) | Compute Routes **Enterprise** | 2 |
+| Routes, main + alternative in one request (out + back) | Compute Routes (no toll prices) | 2 |
 | Stops along each day | Places Text Search **Enterprise** | 1 per day (`PLACES_SEARCHES_PER_DAY`) |
 | Choose stops + write day descriptions | Bedrock, `BEDROCK_FAST_MODEL_ID` if set | 1 call, ~2k tokens in, ~250 out |
 
 How it is kept down:
-- One route request per leg returns both the main route and an alternative. There is no separate toll-free option.
+- One route request per leg returns both the main route and an alternative, without toll prices (which would move it to the Enterprise SKU).
 - One Places search per day; the traveller's interests take turns across days. Each search asks for 20 results (billed per request, not per result), and repeated searches in one plan are reused.
 - The model sees the top 8 candidates per day, and stop choice runs on the fast model when `BEDROCK_FAST_MODEL_ID` is set.
 

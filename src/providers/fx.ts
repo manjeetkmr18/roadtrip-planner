@@ -11,7 +11,7 @@ interface ValetResponse {
 
 /**
  * USD → CAD rate from the Bank of Canada's official daily rate (free, no key), used to convert
- * US tolls and fuel prices. Cached in memory; falls back to the last good rate, then to
+ * US fuel prices and fares. Cached in memory; falls back to the last good rate, then to
  * USD_CAD_RATE, so a trip is never held up by the feed.
  */
 export class ExchangeRates {
