@@ -87,3 +87,13 @@ describe('suggestion bias', () => {
     expect(visitorLocation({ 'x-vercel-ip-latitude': 'x', 'x-vercel-ip-longitude': '1' })).toBeUndefined();
   });
 });
+
+describe('travel places only', () => {
+  it('drops clinics and shops when there are real places to show', async () => {
+    const pred = (placeId: string, title: string, types: string[]) => ({ placePrediction: { placeId, text: { text: title }, structuredFormat: { mainText: { text: title } }, types } });
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ suggestions: [pred('a', 'Banff', ['locality', 'political', 'geocode']), pred('b', 'Banfield Pet Hospital', ['veterinary_care', 'point_of_interest', 'establishment']), pred('c', 'Banff Gondola', ['tourist_attraction', 'point_of_interest'])] })),
+    ));
+    expect((await new PlaceSearchProvider('k').suggest('Banf')).map((s) => s.title)).toEqual(['Banff', 'Banff Gondola']);
+  });
+});

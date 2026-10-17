@@ -31,6 +31,20 @@ export interface PickedPlace {
   region?: string;
 }
 
+/**
+ * Places a trip can start, end or stop at: towns, regions and addresses ("geocode" covers all of
+ * those), plus parks, sights, airports, places to stay and eat. Keeps clinics, shops and offices
+ * out of the list ("Banf" → Banff, not Banfield Pet Hospital).
+ */
+const TRAVEL_TYPES = new Set([
+  'geocode', 'tourist_attraction', 'park', 'national_park', 'state_park', 'natural_feature', 'beach', 'hiking_area', 'campground', 'rv_park',
+  'museum', 'art_gallery', 'historical_landmark', 'historical_place', 'monument', 'church', 'zoo', 'aquarium', 'amusement_park', 'ski_resort',
+  'marina', 'ferry_terminal', 'airport', 'train_station', 'bus_station', 'transit_station', 'stadium', 'event_venue', 'visitor_center',
+  'lodging', 'hotel', 'motel', 'resort_hotel', 'restaurant', 'cafe', 'winery', 'brewery', 'shopping_mall', 'university', 'gas_station',
+  'electric_vehicle_charging_station', 'parking',
+]);
+export const isTravelPlace = (types?: string[]) => !types?.length || types.some((t) => TRAVEL_TYPES.has(t));
+
 /** Session tokens group a user's keystrokes and the final pick into one billed Google session. */
 export const SESSION_TOKEN = /^[A-Za-z0-9_-]{8,64}$/;
 
@@ -70,6 +84,7 @@ export class PlaceSearchProvider {
     return (res.suggestions ?? [])
       .map((s) => s.placePrediction)
       .filter((p): p is NonNullable<typeof p> => !!p?.placeId)
+      .filter((p, _i, all) => isTravelPlace(p.types) || !all.some((x) => isTravelPlace(x.types)))
       .slice(0, 6)
       .map((p) => {
         const title = p.structuredFormat?.mainText?.text ?? p.text?.text ?? '';
