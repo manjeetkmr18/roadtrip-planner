@@ -380,7 +380,9 @@ export class PlacesProvider {
   private sample(query: string, line: LatLng[], max: number, ctx: ProviderContext): CandidatePlace[] {
     ctx.sample('Stops are placeholders (no GOOGLE_MAPS_API_KEY); real attractions come from Google Places.');
     return samplePoints(line, Math.min(max, 4)).map((p, i) => {
-      const town = nearestSamplePlace(p);
+      const near = nearestSamplePlace(p);
+      // Outside the sample list's area (e.g. Europe), name the nearest airport city instead.
+      const town = haversineMeters(p, near.location) > 300_000 ? { name: nearestAirports(p, 1, 400)[0]?.city ?? near.name } : near;
       const loc = pointAlong([p, { lat: p.lat + 0.02, lng: p.lng + 0.02 }], 0.5);
       return {
         id: `sample-${query.replace(/\W+/g, '-')}-${i}-${town.name.replace(/\W+/g, '')}`,
@@ -388,7 +390,7 @@ export class PlacesProvider {
         location: loc,
         rating: 4.2 + (i % 3) / 10,
         ratingCount: 500 + i * 250,
-        types: ['tourist_attraction'],
+        types: /museum|indoor|gallery/.test(query) ? ['museum', 'tourist_attraction'] : ['tourist_attraction'],
         openingHours: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: '09:00', close: '17:00' })),
         query,
         sample: true,
