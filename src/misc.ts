@@ -1,9 +1,11 @@
-import { BadGatewayException, BadRequestException, Body, Controller, Get, Headers, Inject, Logger, Module, Post, Query, UseGuards } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Body, Controller, Get, Headers, HttpException, HttpStatus, Inject, Logger, Module, Post, Query, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DB, type Db } from './db/db.module.js';
 import { feedback } from './db/schema.js';
-import { AuthModule, CurrentUser, JwtGuard, type AuthUser } from './auth/auth.js';
+import { AuthModule, AuthService, CurrentUser, JwtGuard, type AuthUser } from './auth/auth.js';
+import { clientIp, RateLimiter } from './common/rate-limit.js';
 import { ZodPipe } from './common/zod.pipe.js';
 import { ENV, type Env } from './config/env.js';
 import { IntegrationsController } from './integrations.js';
@@ -49,15 +51,38 @@ export function visitorLocation(h: Record<string, string | undefined>) {
   return { lat, lng };
 }
 
-/** Type-ahead for the trip form's place fields. Signed-in only, so the Google key can't be farmed. */
+/**
+ * Type-ahead for the place fields, including the homepage search box (so signed out too).
+ * Signed-out callers get a tighter per-IP budget, so the Google key can't be farmed.
+ */
 @Controller('places')
-@UseGuards(JwtGuard)
 export class PlacesController {
   private readonly log = new Logger(PlacesController.name);
-  constructor(private readonly p: Providers) {}
+  private readonly perMinute = new RateLimiter(40, 60_000);
+  private readonly perDay = new RateLimiter(400, 24 * 60 * 60 * 1000);
+  constructor(
+    private readonly p: Providers,
+    private readonly auth: AuthService,
+  ) {}
+
+  private budget(req: Request) {
+    const header = req.headers.authorization;
+    if (header?.startsWith('Bearer ')) {
+      try {
+        this.auth.verify(header.slice(7));
+        return; // signed in: the global limit is enough
+      } catch {
+        /* expired token: treat as signed out */
+      }
+    }
+    const ip = clientIp(req as never);
+    const wait = this.perMinute.hit(ip) || this.perDay.hit(ip);
+    if (wait) throw new HttpException({ statusCode: 429, message: 'Too many place searches. Sign in or try again later.' }, HttpStatus.TOO_MANY_REQUESTS);
+  }
 
   @Get('autocomplete')
-  async autocomplete(@Query(new ZodPipe(Suggest)) q: z.infer<typeof Suggest>, @Headers() h: Record<string, string | undefined>) {
+  async autocomplete(@Query(new ZodPipe(Suggest)) q: z.infer<typeof Suggest>, @Headers() h: Record<string, string | undefined>, @Req() req: Request) {
+    this.budget(req);
     // The trip's start when the form knows it, else roughly where the user is (Vercel's IP geolocation).
     const near = q.lat !== undefined && q.lng !== undefined ? { lat: q.lat, lng: q.lng } : visitorLocation(h);
     try {
@@ -70,7 +95,8 @@ export class PlacesController {
   }
 
   @Get('details')
-  async details(@Query(new ZodPipe(Details)) q: z.infer<typeof Details>) {
+  async details(@Query(new ZodPipe(Details)) q: z.infer<typeof Details>, @Req() req: Request) {
+    this.budget(req);
     if (!this.p.placeSearch.live) throw new BadRequestException('Place details need a Google key');
     try {
       return await this.p.placeSearch.details(q.id, q.session);
