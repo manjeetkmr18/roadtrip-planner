@@ -160,8 +160,9 @@ export class RoutesProvider {
       destination: wp(q.destination),
       intermediates: q.waypoints.map(wp),
       travelMode: 'DRIVE',
+      // Traffic-unaware (Essentials pricing): Google rejects a departureTime with this mode, and
+      // the planner adds its own buffers, so the route doesn't depend on the clock.
       routingPreference: 'TRAFFIC_UNAWARE',
-      departureTime: Date.parse(q.departureIso) > Date.now() ? q.departureIso : undefined,
       computeAlternativeRoutes: q.alternatives && q.waypoints.length === 0,
       // No toll prices (Travlio doesn't price tolls), which keeps requests out of the toll SKU.
       routeModifiers: { avoidFerries: q.avoidFerries || undefined },

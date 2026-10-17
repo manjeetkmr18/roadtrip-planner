@@ -54,3 +54,19 @@ describe('place suggestions', () => {
     expect((init.headers as Record<string, string>)['x-goog-fieldmask']).not.toContain('displayName');
   });
 });
+
+describe('Google Routes request', () => {
+  it('never sends a departure time with traffic-unaware routing (Google returns 400)', async () => {
+    const { RoutesProvider } = await import('./google.js');
+    const { ProviderContext } = await import('./infra.js');
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ routes: [{ distanceMeters: 1000, duration: '60s', polyline: { encodedPolyline: '' } }] })));
+    vi.stubGlobal('fetch', fetch);
+    await new RoutesProvider('k').compute(
+      { origin: { lat: 43.65, lng: -79.38 }, destination: { lat: 43.25, lng: -79.87 }, waypoints: [], departureIso: '2099-01-01T09:00:00-05:00', alternatives: false },
+      new ProviderContext(),
+    );
+    const body = JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.routingPreference).toBe('TRAFFIC_UNAWARE');
+    expect(body).not.toHaveProperty('departureTime');
+  });
+});

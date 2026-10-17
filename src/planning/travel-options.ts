@@ -68,7 +68,14 @@ export async function travelOptions(q: TravelOptionsQuery, p: Providers, ctx = n
       }
     } catch (e) {
       notes.push(`Driving time could not be checked: ${(e as Error).message.slice(0, 80)}`);
-      drive = { possible: true, note: 'Driving time could not be checked.' };
+      // Estimate from distance (roads run ~1.3× the straight line at ~85 km/h) so a long trip
+      // still gets the flight suggestion when Google can't be reached.
+      const hours = (straightLineKm * 1.3) / 85;
+      drive = {
+        possible: true,
+        daysEachWay: Math.max(1, Math.ceil(hours / q.maxDrivingHoursPerDay)),
+        note: `Driving time could not be checked; roughly ${Math.round(hours)} h each way by distance.`,
+      };
     }
   }
 
