@@ -205,10 +205,12 @@ await step('Sharing: create a share link', async () => {
   shareToken = data.shareToken;
   if (!shareToken) throw new Error('No share token');
 });
-await step('Sharing: the link opens without signing in', async () => {
-  const { data } = await call('GET', `/share/${shareToken}`);
-  if (!data.plan) throw new Error('No plan in the shared view');
-});
+if (plan) {
+  await step('Sharing: the link opens without signing in', async () => {
+    const { data } = await call('GET', `/share/${shareToken}`);
+    if (!data.plan) throw new Error('No plan in the shared view');
+  });
+} else log('SKIP', 'Sharing: the link opens without signing in', 'no plan to share (planning failed above)');
 await step('Privacy: another user cannot open this trip', async () => {
   const { data } = await call('POST', '/auth/register', { body: { email: email('b'), password } });
   token2 = data.token;

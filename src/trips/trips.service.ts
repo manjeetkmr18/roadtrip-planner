@@ -39,8 +39,14 @@ export class TripsService {
   /** Same search within 10 minutes is answered from memory (route + flight calls cost money). */
   private readonly optionsCache = new TtlCache<TravelOptions>(10 * 60_000);
 
-  travelOptions(q: TravelOptionsQuery) {
-    return this.optionsCache.get(JSON.stringify(q), () => travelOptions(q, this.providers));
+  async travelOptions(q: TravelOptionsQuery) {
+    try {
+      return await this.optionsCache.get(JSON.stringify(q), () => travelOptions(q, this.providers));
+    } catch (e) {
+      // A place that can't be found, or a provider refusing the request: say so instead of a bare 500.
+      this.log.warn(`travel-options failed: ${(e as Error).message}`);
+      throw new HttpException({ statusCode: 502, message: (e as Error).message.slice(0, 300) }, HttpStatus.BAD_GATEWAY);
+    }
   }
 
   private defaultTitle(r: TripRequest) {

@@ -26,6 +26,7 @@ export interface ResolvedPlace {
 
 interface GeocodeResponse {
   status: string;
+  error_message?: string;
   results: {
     formatted_address: string;
     place_id: string;
@@ -67,6 +68,10 @@ export class GeocodingProvider {
     const q = input.placeId ? `place_id=${encodeURIComponent(input.placeId)}` : `address=${encodeURIComponent(input.address)}`;
     const res = await fetchJson<GeocodeResponse>('Google Geocoding', `https://maps.googleapis.com/maps/api/geocode/json?${q}&key=${this.key}`);
     ctx.record('geocoding');
+    if (res.status === 'REQUEST_DENIED' || res.status === 'OVER_QUERY_LIMIT' || res.status === 'OVER_DAILY_LIMIT') {
+      // A key or billing problem, not a bad address: pass Google's reason on so it can be fixed.
+      throw new Error(`Google Geocoding refused the request (${res.status}): ${res.error_message ?? 'no reason given'}`);
+    }
     if (res.status !== 'OK' || !res.results.length) throw new Error(`Could not find "${input.address}" (${res.status})`);
     const r = this.fromResult(res.results[0]);
     return input.location ? { ...r, location: input.location } : r;
