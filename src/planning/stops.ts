@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DEFAULT_VISIT_MINUTES, distanceToRoute, fractionAlong, type LatLng, type Pace, type Stop } from '../core/index.js';
+import { DEFAULT_VISIT_MINUTES, distanceToRoute, fractionAlong, type LatLng, type Pace, type Stop, type WeatherObservation } from '../core/index.js';
 import type { CandidatePlace } from '../providers/google.js';
 import type { Llm } from '../providers/llm.js';
 import { nowIso, type ProviderContext } from '../providers/infra.js';
@@ -48,6 +48,49 @@ export function interestQueries(interests: string[], max = 2): string[] {
   };
   const qs = [...new Set(interests.map((i) => map[i.toLowerCase()] ?? i.toLowerCase()))];
   return (qs.length ? qs : ['top tourist attractions']).slice(0, max);
+}
+
+// ---------- Weather-aware choice ----------
+
+const INDOOR = /museum|art_gallery|aquarium|shopping_mall|library|movie_theater|bowling|cafe|restaurant|bakery|spa|planetarium|performing_arts|market|church|cathedral|casino|indoor|gallery|theatre|theater/;
+const OUTDOOR = /park|hiking|beach|campground|natural_feature|scenic|viewpoint|garden|zoo|amusement|marina|lake|trail|ski|golf|observation_deck|waterfall|lookout/;
+
+/** Whether a place is mostly inside or outside, from its Google types and name. */
+export function placeSetting(types: string[], name = ''): 'indoor' | 'outdoor' | undefined {
+  const t = `${types.join(' ')} ${name.toLowerCase()}`;
+  if (INDOOR.test(t)) return 'indoor';
+  if (OUTDOOR.test(t)) return 'outdoor';
+  return undefined;
+}
+
+export type WeatherMood = 'wet' | 'cold' | 'hot' | 'fine' | 'unknown';
+
+/** The one thing about a day's weather that should change which stops make sense. */
+export function weatherMood(obs: WeatherObservation[]): WeatherMood {
+  const f = obs.filter((o) => o.kind === 'forecast');
+  if (f.length) {
+    if (f.some((o) => o.snow || o.thunder || (o.precipChancePct ?? 0) >= 60 || o.alerts.some((a) => a.severity === 'warning'))) return 'wet';
+    if (f.some((o) => (o.highC ?? 99) <= -5)) return 'cold';
+    if (f.some((o) => (o.highC ?? -99) >= 32)) return 'hot';
+    return 'fine';
+  }
+  const c = obs.filter((o) => o.kind === 'climate');
+  if (c.some((o) => (o.highC ?? 99) <= -5)) return 'cold';
+  if (c.some((o) => (o.highC ?? -99) >= 32)) return 'hot';
+  return 'unknown';
+}
+
+/** Re-rank for the weather: indoor places up on wet/cold/hot days, outdoor places up on fine days. */
+export function adjustForWeather(cands: RankedCandidate[], mood: WeatherMood): RankedCandidate[] {
+  if (mood === 'unknown') return cands;
+  const delta = (c: RankedCandidate) => {
+    const setting = placeSetting(c.place.types, c.place.name);
+    if (mood === 'wet') return setting === 'indoor' ? 1.5 : setting === 'outdoor' ? -2 : 0;
+    if (mood === 'cold') return setting === 'indoor' ? 0.8 : setting === 'outdoor' ? -0.8 : 0;
+    if (mood === 'hot') return setting === 'indoor' ? 0.8 : 0;
+    return setting === 'outdoor' ? 0.5 : 0;
+  };
+  return cands.map((c) => ({ ...c, score: Math.round((c.score + delta(c)) * 100) / 100 })).sort((a, b) => b.score - a.score);
 }
 
 export interface RankedCandidate {
@@ -111,6 +154,8 @@ export interface DayChoiceInput {
   /** Stops the traveller added that this day passes through. */
   via?: string[];
   weatherHeadline?: string;
+  /** Weather at each place of the day (forecast, or typical for the season). */
+  weather?: { mood: WeatherMood; places: { place: string; kind: 'forecast' | 'typical'; summary?: string; highC?: number | null; lowC?: number | null; rainChancePct?: number | null; snow?: boolean; windKmh?: number | null }[] };
   /** Local sunset time at the day's end place (creator mode). */
   sunset?: string;
   candidates: RankedCandidate[];
@@ -149,7 +194,13 @@ const SYSTEM = `You arrange road-trip days for a planning app. Rules:
 - Choose stops ONLY from the candidate list given for that day, by id. Never invent places.
 - Respect each day's stop budget (maximum number of stops). Fewer is fine.
 - Prefer variety (not several near-identical stops) and the traveller's interests.
-- Prefer stops that are open and suit the weather headline when one is given.
+- Plan around each day's weather (weather.places: forecast, or "typical" for the season when the date is too far out).
+  On wet, snowy, stormy or very cold days (weather.mood "wet" or "cold") prefer candidates with setting "indoor"
+  (museums, galleries, markets, cafés) and use fewer outdoor stops; on fine days favour "outdoor" ones (parks,
+  viewpoints, trails, beaches). On hot days put indoor stops mid-afternoon.
+- When the weather shaped the day, say so in a few words in the narrative, e.g. "With rain expected, ...".
+  Call it "forecast" only for kind "forecast"; for kind "typical" say "usually" or "this time of year".
+- Prefer stops that are open.
 - Narrative: 1–2 plain sentences per day. Mention only the chosen stops, the "via" places and the start/end places given.
   Do not state prices, distances, times, opening hours, or safety claims; the app shows those from data.
 - Title: a short name for each day (2–4 words) from its places or scenery, e.g. "Lake Superior shore". No dates or numbers.
@@ -173,7 +224,16 @@ export async function chooseStops(
       d.drivingHours > 0
         ? `Drive from ${d.from} to ${d.to}${via}${names.length ? `, with stops at ${names.join(', ')}` : ''}.`
         : `A day around ${d.to}${names.length ? `: ${names.join(', ')}` : ' to explore at your own pace'}.`;
-    fallback.set(d.day, { ids, narrative, title: templateTitle(d), byModel: false });
+    const forecast = d.weather?.places.some((x) => x.kind === 'forecast');
+    const note =
+      d.weather?.mood === 'wet' && forecast
+        ? ' Wet weather is forecast, so indoor stops come first.'
+        : d.weather?.mood === 'cold'
+          ? ' It will be cold, so the plan keeps outdoor time short.'
+          : d.weather?.mood === 'hot'
+            ? ' A hot day: save indoor stops for the afternoon.'
+            : '';
+    fallback.set(d.day, { ids, narrative: narrative + note, title: templateTitle(d), byModel: false });
   }
   if (!ctx.llm.enabled) {
     ctx.provider.note('Day descriptions are template text (Bedrock not configured).');
@@ -192,7 +252,7 @@ export async function chooseStops(
       drivingHours: Math.round(d.drivingHours * 10) / 10,
       stopBudget: d.budget,
       via: d.via,
-      weather: d.weatherHeadline,
+      weather: d.weather ? { mood: d.weather.mood, headline: d.weatherHeadline, places: d.weather.places } : d.weatherHeadline,
       sunset: ctx.creatorMode ? d.sunset : undefined,
       candidates: d.candidates.slice(0, LLM_CANDIDATES_PER_DAY).map((c) => ({
         id: c.place.id,
@@ -202,6 +262,7 @@ export async function chooseStops(
         reviews: c.place.ratingCount,
         detourMin: c.detourMinutes,
         positionAlongDay: Math.round(c.routeFraction * 100) / 100,
+        setting: placeSetting(c.place.types, c.place.name),
       })),
     })),
   };

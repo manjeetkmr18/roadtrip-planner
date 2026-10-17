@@ -78,7 +78,15 @@ export function reviewDay(args: {
         ? `Outside the forecast window — typical for this time of year: ${climate.summary ?? 'see details'}. We'll switch to the real forecast when it's available.`
         : 'No forecast available yet. Refresh closer to departure.',
       observations,
-      suggestions: ['Refresh the plan 72 hours and 24 hours before this day to get the actual forecast.'],
+      suggestions: [
+        ...(observations.some((o) => o.kind === 'climate' && o.snow)
+          ? ['Snow is possible this time of year: winter tires and an ice scraper are worth having, and keep driving days flexible.']
+          : observations.some((o) => o.kind === 'climate' && (o.lowC ?? 99) <= 0)
+            ? ['Frosty mornings are typical: allow time to clear the car, and watch for black ice early in the day.']
+            : []),
+        ...(observations.some((o) => o.kind === 'climate' && (o.highC ?? -99) >= 30) ? ['Hot weather is typical: plan indoor stops for mid-afternoon and carry water.'] : []),
+        'Refresh the plan 72 hours and 24 hours before this day to get the actual forecast.',
+      ],
     };
   }
 

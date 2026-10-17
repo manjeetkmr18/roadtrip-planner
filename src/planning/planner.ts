@@ -35,7 +35,7 @@ import { nowIso, ProviderContext } from '../providers/infra.js';
 import { timeZoneAt } from '../core/timezone.js';
 import { legCostLines, parkingLine } from './route-costs.js';
 import { flyDriveCosts, flyDriveIssues, roadTripFor } from './fly-drive.js';
-import { chooseStops, interestQueries, rankCandidates, toStop, type DayChoiceInput } from './stops.js';
+import { adjustForWeather, chooseStops, interestQueries, placeSetting, rankCandidates, toStop, weatherMood, type DayChoiceInput } from './stops.js';
 
 function timeZoneFor(p: ResolvedPlace): string {
   return timeZoneAt(p);
@@ -309,9 +309,14 @@ export class TripPlanner {
     if (selRet) placeAddedStops(drafts.slice(drafts.length - retSegs.length));
 
     // 5. Weather first (it informs stop choice), then candidate stops
+    // Each day's weather: where it starts, en route, where it ends, and at stops the traveller added.
     const weatherFor = async (d: Draft): Promise<WeatherObservation[]> => {
       const pts = d.line ? samplePoints(d.line, 3) : [d.endResolved.location];
       const labels = d.line ? [d.day.startPlace, `en route (${d.day.startPlace} → ${d.day.endPlace})`, d.day.endPlace] : [d.day.endPlace];
+      for (const s of (addedStops.get(d.day.day) ?? []).slice(0, 2)) {
+        pts.splice(pts.length - 1, 0, s.location);
+        labels.splice(labels.length - 1, 0, s.name);
+      }
       return Promise.all(pts.map((pt, i) => p.weather.observe(pt, d.day.date, labels[i])));
     };
     const weather = await mapLimit(drafts, 3, (d) => weatherFor(d).catch(() => [] as WeatherObservation[]));
@@ -348,6 +353,21 @@ export class TripPlanner {
           ctx.note(`Place search failed for day ${d.day.day}: ${(e as Error).message.slice(0, 100)}`);
         }
       }
+      // Rainy-day backup: if the weather is wet and the searches found almost nothing indoors, look for indoor places too.
+      const mood = weatherMood(weather[i]);
+      if (mood === 'wet' && cands.filter((c) => placeSetting(c.types, c.name) === 'indoor').length < 2) {
+        try {
+          const q = 'indoor attractions';
+          const found = d.line
+            ? await searchOnce(`route|${q}|${d.day.day}`, () => p.places.alongRoute(q, encodePolyline(d.line!), PLACES_RESULTS_PER_SEARCH, ctx))
+            : await searchOnce(`near|${q}|${d.endResolved.location.lat.toFixed(2)},${d.endResolved.location.lng.toFixed(2)}`, () =>
+                p.places.near(q, d.endResolved.location, 25_000, PLACES_RESULTS_PER_SEARCH, ctx),
+              );
+          cands.push(...found);
+        } catch (e) {
+          ctx.note(`Indoor place search failed for day ${d.day.day}: ${(e as Error).message.slice(0, 100)}`);
+        }
+      }
       const prelimReview = reviewDay({ date: d.day.date, observations: weather[i], hasOutdoorStops: true, drivingHours: d.day.drivingSeconds / 3600 });
       const added = addedStops.get(d.day.day) ?? [];
       return {
@@ -359,9 +379,24 @@ export class TripPlanner {
         // The traveller's own stops take time from the day's budget.
         budget: Math.max(0, stopBudget(d.line ? d.day.drivingSeconds : 0, req.preferences.pace) - added.length),
         via: added.map((s) => s.name),
-        weatherHeadline: prelimReview.rating === 'unknown' ? undefined : prelimReview.headline,
+        weatherHeadline: prelimReview.headline,
+        weather: {
+          mood,
+          places: weather[i]
+            .filter((o) => o.kind !== 'unavailable')
+            .map((o) => ({
+              place: o.place,
+              kind: o.kind === 'climate' ? ('typical' as const) : ('forecast' as const),
+              summary: o.summary,
+              highC: o.highC,
+              lowC: o.lowC,
+              rainChancePct: o.precipChancePct,
+              snow: o.snow,
+              windKmh: o.gustKmh ?? o.windKmh,
+            })),
+        },
         sunset: sun[i]?.sunset,
-        candidates: rankCandidates(cands, d.line, req.preferences.maxDetourMinutes),
+        candidates: adjustForWeather(rankCandidates(cands, d.line, req.preferences.maxDetourMinutes), mood),
       };
     });
     // A place should appear on only one day.

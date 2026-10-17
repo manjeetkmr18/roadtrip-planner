@@ -186,7 +186,13 @@ describe('stops', () => {
 });
 
 /** Wraps the sample providers and records what the planner asks Google for. */
-function spying() {
+class DryWeather {
+  async observe(_p: unknown, date: string, place: string): Promise<WeatherObservation> {
+    return { date, place, kind: 'forecast', precipChancePct: 10, snow: false, alerts: [], highC: 15, lowC: 6 };
+  }
+}
+
+function spying(weather: unknown = new DryWeather()) {
   const routeQueries: { alternatives: boolean }[] = [];
   const placeQueries: string[] = [];
   class SpyRoutes extends RoutesProvider {
@@ -206,7 +212,7 @@ function spying() {
       return super.near(query, center, r, max, ctx);
     }
   }
-  return { routeQueries, placeQueries, p: providers({ routes: new SpyRoutes(), places: new SpyPlaces() }) };
+  return { routeQueries, placeQueries, p: providers({ routes: new SpyRoutes(), places: new SpyPlaces(), weather }) };
 }
 
 describe('TripPlanner: Google calls per plan (cost)', () => {
@@ -215,6 +221,13 @@ describe('TripPlanner: Google calls per plan (cost)', () => {
     const two = TripRequest.parse({ ...req, preferences: { interests: ['food discovery', 'history'] } });
     await new TripPlanner(s.p, { usdToCad: 1.38 }).generate(two);
     expect(s.placeQueries).toEqual(['famous local restaurant', 'historic site', 'famous local restaurant']);
+  });
+
+  it('adds an indoor search on a rainy day when the interests found nothing indoors', async () => {
+    const s = spying(new FakeWeather()); // 70% rain every day
+    const nature = TripRequest.parse({ ...req, preferences: { interests: ['nature'] } });
+    await new TripPlanner(s.p, { usdToCad: 1.38 }).generate(nature);
+    expect(s.placeQueries.filter((q) => q === 'indoor attractions')).toHaveLength(3);
   });
 
   it('can still make one search per interest per day when configured', async () => {
@@ -328,5 +341,18 @@ describe('Mockup features: days, creator mode, detours, ferries', () => {
     const far = { ...near, id: 'b', name: 'Far', location: { lat: 44.3, lng: -78.5 } };
     expect(rankCandidates([near, far], line, 90).map((r) => r.place.id)).toEqual(['a', 'b']);
     expect(rankCandidates([near, far], line, 20).map((r) => r.place.id)).toEqual(['a']);
+  });
+});
+
+describe('weather-aware stops', () => {
+  const cand = (name: string, types: string[], score: number) => ({ place: { id: name, name, types, location: { lat: 0, lng: 0 } } as never, score, routeFraction: 0.5, detourMinutes: 0 });
+  it('moves indoor places up on a wet day and outdoor places up on a fine day', async () => {
+    const { adjustForWeather, weatherMood } = await import('./stops.js');
+    const list = [cand('Riverside Park', ['park'], 10), cand('City Museum', ['museum'], 9)];
+    const wet = weatherMood([{ date: '2026-10-20', place: 'x', kind: 'forecast', precipChancePct: 80, alerts: [] }]);
+    expect(wet).toBe('wet');
+    expect(adjustForWeather(list, wet)[0].place.name).toBe('City Museum');
+    expect(adjustForWeather(list, 'fine')[0].place.name).toBe('Riverside Park');
+    expect(weatherMood([{ date: '2026-10-20', place: 'x', kind: 'climate', highC: 12, alerts: [] }])).toBe('unknown');
   });
 });

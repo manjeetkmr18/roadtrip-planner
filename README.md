@@ -62,7 +62,12 @@ src/
    - Fuel and parking are estimated.
    - Unknown tolls are listed, never counted as $0.
 4. **Split into driving days.** Days are even and stay within the user's daily limit; overnight areas are named.
-5. **Check the weather for each day.** Forecasts come from Environment Canada or the US National Weather Service, plus official alerts. Each day is rated favourable / mixed / poor, with suggestions.
+5. **Check the weather for each day**, where the day starts, en route, at stops you added and where it ends:
+   - Canada and the US: Environment Canada / the US National Weather Service, with official alerts.
+   - Anywhere else, or 7–9 days out: MET Norway's worldwide forecast (yr.no, CC BY 4.0).
+   - Further ahead: typical weather for that week from NASA POWER's 25-year averages, labelled "typical", never "forecast".
+   Each day is rated favourable / mixed / poor, with suggestions. On wet, cold or hot days indoor places rank higher
+   (with an extra indoor search if nothing indoor was found), and the AI is told to plan around each place's weather.
 6. **Find stops.** Search for places along the route (Google Places), then rank them.
 7. **Arrange the days.** Bedrock picks and describes stops, but only from the list it was given. Without Bedrock, the ranking is used as-is.
 8. **Run the checks in code.** Driving hours, opening hours, stop order, day length, late arrival, trip length, border crossing, road closures (Ontario 511) and travel advisories.
@@ -89,7 +94,7 @@ Travlio does not book flights; each flight links to the same search on Google Fl
 | `ONTARIO_511_API_KEY` | Road closures | Free key from 511on.ca |
 | `OILPRICEAPI_KEY`, `EIA_API_KEY` | Current fuel prices (Canada / US) | Free tiers; otherwise labelled defaults |
 
-Weather (Environment Canada, NWS) and travel advisories (Global Affairs Canada) need no keys.
+Weather (Environment Canada, NWS, MET Norway, NASA POWER) and travel advisories (Global Affairs Canada) need no keys. `NWS_USER_AGENT` (an app name and contact email) is sent to NWS and MET Norway, which both ask for it.
 
 ### Things to verify with your accounts
 
