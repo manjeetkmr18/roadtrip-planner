@@ -1,4 +1,5 @@
 import { FlightsProvider } from './flights.js';
+import { PlaceSearchProvider } from './place-search.js';
 import { Global, Module } from '@nestjs/common';
 import { ENV, type Env } from '../config/env.js';
 import { GeocodingProvider, PlacesProvider, RoutesProvider } from './google.js';
@@ -18,6 +19,7 @@ export class Providers {
     readonly fuel: FuelPriceProvider,
     readonly llm: Llm,
     readonly flights: FlightsProvider = new FlightsProvider(),
+    readonly placeSearch: PlaceSearchProvider = new PlaceSearchProvider(),
   ) {}
 
   static fromEnv(env: Env): Providers {
@@ -33,6 +35,7 @@ export class Providers {
       new FuelPriceProvider(k(env.OILPRICEAPI_KEY), k(env.EIA_API_KEY)),
       new BedrockLlm(k(env.AWS_REGION), k(env.BEDROCK_MODEL_ID), k(env.BEDROCK_FAST_MODEL_ID)),
       new FlightsProvider(k(env.DUFFEL_ACCESS_TOKEN)),
+      new PlaceSearchProvider(k(env.GOOGLE_MAPS_API_KEY)),
     );
   }
 }

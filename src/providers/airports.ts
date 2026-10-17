@@ -41,6 +41,9 @@ const WORLD_CITIES: { city: string; country: string; location: LatLng }[] = [
   ['Charlottetown', 'CA', 46.2382, -63.1311], ['Moncton', 'CA', 46.0878, -64.7782], ['Saskatoon', 'CA', 52.1332, -106.67],
 ].map(([city, country, lat, lng]) => ({ city: city as string, country: country as string, location: { lat: lat as number, lng: lng as number } }));
 
+/** The built-in city centres (sample-mode suggestions). */
+export const worldCities = () => WORLD_CITIES;
+
 /**
  * Sample-mode geocoding for cities outside the sample list: the city of a large airport whose
  * name matches the query ("Paris" → Paris), so long-distance trips work without a Google key.

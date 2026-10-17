@@ -29,6 +29,19 @@ export const PlaceInput = z.object({
 });
 export type PlaceInput = z.infer<typeof PlaceInput>;
 
+/** A type-ahead suggestion for a place field. Picking one gives the trip a placeId (and a location). */
+export interface PlaceSuggestion {
+  /** Google place ID; absent for sample suggestions, which carry a location instead. */
+  placeId?: string;
+  /** Main line, e.g. "Banff". */
+  title: string;
+  /** Second line, e.g. "AB, Canada". */
+  subtitle?: string;
+  /** What goes in the field once picked, e.g. "Banff, AB, Canada". */
+  address: string;
+  location?: LatLng;
+}
+
 export const FuelType = z.enum(['gasoline', 'diesel', 'hybrid', 'electric']);
 export type FuelType = z.infer<typeof FuelType>;
 

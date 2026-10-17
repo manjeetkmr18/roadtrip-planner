@@ -84,7 +84,7 @@ Travlio does not book flights; each flight links to the same search on Google Fl
 
 | Variable | Used for | Notes |
 |---|---|---|
-| `GOOGLE_MAPS_API_KEY` | Geocoding, Routes, Places (New) | Server key: API restrictions only (Vercel has no fixed IPs). Never a website/referrer-restricted key; Google rejects those from servers |
+| `GOOGLE_MAPS_API_KEY` | Geocoding, Routes, Places (New), including the place-field suggestions (`GET /api/places/autocomplete`) | Server key: API restrictions only (Vercel has no fixed IPs). Never a website/referrer-restricted key; Google rejects those from servers |
 | `DUFFEL_ACCESS_TOKEN` | Real flights for fly + drive | Optional; searching is free. Without it, flights are sample data |
 | `AWS_REGION`, `BEDROCK_MODEL_ID` + AWS credentials | Stop choice and day descriptions | Model must be enabled in Bedrock |
 | `ONTARIO_511_API_KEY` | Road closures | Free key from 511on.ca |

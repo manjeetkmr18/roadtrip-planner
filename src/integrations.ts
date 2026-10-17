@@ -117,6 +117,13 @@ export class IntegrationsController {
         if (!found.length) throw new Error('No places returned for "museum" near Toronto');
         return `${found.length} museums near Toronto, e.g. ${found[0].name}`;
       }),
+      run('Google Places Autocomplete', async () => {
+        key(env.GOOGLE_MAPS_API_KEY, 'GOOGLE_MAPS_API_KEY');
+        const s = await p.placeSearch.suggest('Banff', { near: TORONTO });
+        if (!s.length || !s[0].placeId) throw new Error('No suggestions for "Banff"');
+        const d = await p.placeSearch.details(s[0].placeId);
+        return `"Banff" → ${s[0].address} (${d.location.lat.toFixed(3)}, ${d.location.lng.toFixed(3)})`;
+      }),
       run('AI (Amazon Bedrock)', async () => {
         if (!p.llm.enabled) off('AWS_REGION and BEDROCK_MODEL_ID not set');
         const text = await p.llm.complete({ system: 'Reply with the single word OK.', prompt: 'Health check', maxTokens: 10, fast: true }, ctx());

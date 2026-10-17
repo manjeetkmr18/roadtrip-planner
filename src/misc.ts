@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Module, Post, UseGuards } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Body, Controller, Get, Inject, Logger, Module, Post, Query, UseGuards } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DB, type Db } from './db/db.module.js';
@@ -7,6 +7,8 @@ import { AuthModule, CurrentUser, JwtGuard, type AuthUser } from './auth/auth.js
 import { ZodPipe } from './common/zod.pipe.js';
 import { ENV, type Env } from './config/env.js';
 import { IntegrationsController } from './integrations.js';
+import { Providers } from './providers/providers.module.js';
+import { SESSION_TOKEN } from './providers/place-search.js';
 
 const Feedback = z.object({
   tripId: z.uuid().optional(),
@@ -25,6 +27,48 @@ export class FeedbackController {
   async create(@CurrentUser() user: AuthUser, @Body(new ZodPipe(Feedback)) body: z.infer<typeof Feedback>) {
     const [row] = await this.db.insert(feedback).values({ ...body, userId: user.id }).returning({ id: feedback.id });
     return { id: row.id, received: true };
+  }
+}
+
+const Suggest = z.object({
+  q: z.string().trim().min(1).max(120),
+  session: z.string().regex(SESSION_TOKEN).optional(),
+  lat: z.coerce.number().min(-90).max(90).optional(),
+  lng: z.coerce.number().min(-180).max(180).optional(),
+});
+const Details = z.object({
+  id: z.string().regex(/^[A-Za-z0-9_-]{10,300}$/, 'Not a place ID'),
+  session: z.string().regex(SESSION_TOKEN).optional(),
+});
+
+/** Type-ahead for the trip form's place fields. Signed-in only, so the Google key can't be farmed. */
+@Controller('places')
+@UseGuards(JwtGuard)
+export class PlacesController {
+  private readonly log = new Logger(PlacesController.name);
+  constructor(private readonly p: Providers) {}
+
+  @Get('autocomplete')
+  async autocomplete(@Query(new ZodPipe(Suggest)) q: z.infer<typeof Suggest>) {
+    const near = q.lat !== undefined && q.lng !== undefined ? { lat: q.lat, lng: q.lng } : undefined;
+    try {
+      return { live: this.p.placeSearch.live, suggestions: await this.p.placeSearch.suggest(q.q, { session: q.session, near }) };
+    } catch (e) {
+      // Typing still works without suggestions, so this is a warning, not an outage.
+      this.log.warn(`autocomplete failed: ${(e as Error).message.slice(0, 300)}`);
+      throw new BadGatewayException((e as Error).message.slice(0, 300));
+    }
+  }
+
+  @Get('details')
+  async details(@Query(new ZodPipe(Details)) q: z.infer<typeof Details>) {
+    if (!this.p.placeSearch.live) throw new BadRequestException('Place details need a Google key');
+    try {
+      return await this.p.placeSearch.details(q.id, q.session);
+    } catch (e) {
+      this.log.warn(`place details failed: ${(e as Error).message.slice(0, 300)}`);
+      throw new BadGatewayException((e as Error).message.slice(0, 300));
+    }
   }
 }
 
@@ -65,5 +109,5 @@ export class HealthController {
   }
 }
 
-@Module({ imports: [AuthModule], controllers: [FeedbackController, HealthController, IntegrationsController] })
+@Module({ imports: [AuthModule], controllers: [FeedbackController, HealthController, IntegrationsController, PlacesController] })
 export class MiscModule {}
