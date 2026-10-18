@@ -43,7 +43,8 @@ export class BedrockLlm implements Llm {
           modelId,
           system: [{ text: args.system }],
           messages: [{ role: 'user', content: [{ text: args.prompt }] }],
-          inferenceConfig: { maxTokens: args.maxTokens, temperature: 0.3 },
+          // No temperature: newer Claude models reject it as deprecated.
+          inferenceConfig: { maxTokens: args.maxTokens },
         }),
       );
     const modelId = this.profiled.get(configured) ?? configured;
