@@ -180,12 +180,35 @@ const LlmChoice = z.object({
     z.object({
       day: z.number(),
       stopIds: z.array(z.string()),
-      narrative: z.string().max(600),
-      title: z.string().max(60).optional(),
-      creatorTip: z.string().max(300).optional(),
+      // Trim rather than reject: one long title shouldn't throw away the whole plan.
+      narrative: z.string().transform((t) => t.slice(0, 600)),
+      title: z.string().transform((t) => t.slice(0, 60)).optional(),
+      creatorTip: z.string().transform((t) => t.slice(0, 300)).optional(),
     }),
   ),
 });
+
+/** JSON schema for the model's structured answer (mirrors LlmChoice). */
+const LLM_SCHEMA = {
+  type: 'object',
+  properties: {
+    days: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          day: { type: 'integer' },
+          title: { type: 'string', description: 'Short name for the day, 2-4 words' },
+          stopIds: { type: 'array', items: { type: 'string' } },
+          narrative: { type: 'string', description: '1-2 plain sentences' },
+          creatorTip: { type: 'string' },
+        },
+        required: ['day', 'stopIds', 'narrative'],
+      },
+    },
+  },
+  required: ['days'],
+};
 
 /** Candidates sent to the model per day. Days have at most a few stops, so the top 8 are plenty. */
 const LLM_CANDIDATES_PER_DAY = 8;
@@ -206,7 +229,7 @@ const SYSTEM = `You arrange road-trip days for a planning app. Rules:
 - Title: a short name for each day (2–4 words) from its places or scenery, e.g. "Lake Superior shore". No dates or numbers.
 - If creatorMode is true, add creatorTip: one sentence naming the best chosen stop for photos or video and when to film it
   (use the given sunset time), ending with "Park before filming." Otherwise omit creatorTip.
-- Reply with JSON only, matching: {"days":[{"day":1,"title":"...","stopIds":["..."],"narrative":"...","creatorTip":"..."}]}`;
+- Answer with one entry per day: {"days":[{"day":1,"title":"...","stopIds":["..."],"narrative":"...","creatorTip":"..."}]}`;
 
 /** Ask the model to choose and describe stops; fall back to the deterministic ranking if anything is off. */
 export async function chooseStops(
@@ -269,9 +292,15 @@ export async function chooseStops(
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const text = await ctx.llm.complete({ system: SYSTEM, prompt: JSON.stringify(payload), maxTokens: 1500, fast: true }, ctx.provider);
-      const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
-      const parsed = LlmChoice.parse(JSON.parse(json));
+      const maxTokens = 600 + 250 * days.length;
+      let raw: unknown;
+      if (ctx.llm.completeJson) {
+        raw = await ctx.llm.completeJson({ system: SYSTEM, prompt: JSON.stringify(payload), maxTokens, fast: true, name: 'arrange_days', schema: LLM_SCHEMA }, ctx.provider);
+      } else {
+        const text = await ctx.llm.complete({ system: SYSTEM, prompt: JSON.stringify(payload), maxTokens, fast: true }, ctx.provider);
+        raw = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+      }
+      const parsed = LlmChoice.parse(raw);
       const out = new Map(fallback);
       for (const d of parsed.days) {
         const input = days.find((x) => x.day === d.day);
@@ -288,7 +317,7 @@ export async function chooseStops(
       }
       return out;
     } catch (e) {
-      if (attempt === 1) ctx.provider.note(`AI arrangement failed, used ranking instead: ${(e as Error).message.slice(0, 100)}`);
+      if (attempt === 1) ctx.provider.note(`AI arrangement failed, used ranking instead: ${(e as Error).message.slice(0, 200)}`);
     }
   }
   return fallback;

@@ -26,3 +26,18 @@ describe('Bedrock model IDs', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('structured answers', () => {
+  it('forces the tool and returns its input', async () => {
+    const send = vi.fn(async (_cmd: { input: Record<string, unknown> }) => ({
+      output: { message: { content: [{ toolUse: { toolUseId: 't', name: 'arrange_days', input: { days: [{ day: 1, stopIds: ['a'], narrative: 'Say "hi".' }] } } }] } },
+      usage: { inputTokens: 1, outputTokens: 1 },
+    }));
+    const llm = new BedrockLlm('us-east-1', 'global.anthropic.claude-haiku-5-5', undefined, { send } as never);
+    const out = await llm.completeJson({ system: 's', prompt: 'p', maxTokens: 50, name: 'arrange_days', schema: { type: 'object' } }, new ProviderContext());
+    expect(out).toEqual({ days: [{ day: 1, stopIds: ['a'], narrative: 'Say "hi".' }] });
+    const input = send.mock.calls[0][0].input as { toolConfig: { toolChoice: unknown }; inferenceConfig: Record<string, unknown> };
+    expect(input.toolConfig.toolChoice).toEqual({ tool: { name: 'arrange_days' } });
+    expect(input.inferenceConfig).not.toHaveProperty('temperature');
+  });
+});

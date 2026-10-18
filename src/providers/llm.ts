@@ -9,7 +9,14 @@ import { ProviderContext } from './infra.js';
 export interface Llm {
   readonly enabled: boolean;
   complete(args: { system: string; prompt: string; maxTokens: number; fast?: boolean }, ctx: ProviderContext): Promise<string>;
+  /**
+   * Structured reply: the model must answer through a tool with this JSON schema, so the result
+   * is already parsed (no stray text or unescaped quotes to trip over).
+   */
+  completeJson?(args: { system: string; prompt: string; maxTokens: number; fast?: boolean; name: string; schema: Record<string, unknown> }, ctx: ProviderContext): Promise<unknown>;
 }
+
+type ConverseInput = ConstructorParameters<typeof ConverseCommand>[0];
 
 /** Bedrock's reply when a model is only served through a cross-region inference profile. */
 const NEEDS_PROFILE = /on-demand throughput isn.t supported|inference profile/i;
@@ -35,6 +42,32 @@ export class BedrockLlm implements Llm {
   }
 
   async complete(args: { system: string; prompt: string; maxTokens: number; fast?: boolean }, ctx: ProviderContext): Promise<string> {
+    const res = await this.converse(args, {}, ctx);
+    const text = (res.output?.message?.content ?? []).map((c) => ('text' in c ? c.text : '')).join('');
+    if (!text) throw new Error(`Bedrock returned no text (stopReason ${res.stopReason})`);
+    return text;
+  }
+
+  async completeJson(
+    args: { system: string; prompt: string; maxTokens: number; fast?: boolean; name: string; schema: Record<string, unknown> },
+    ctx: ProviderContext,
+  ): Promise<unknown> {
+    const res = await this.converse(
+      args,
+      {
+        toolConfig: {
+          tools: [{ toolSpec: { name: args.name, description: 'Return the answer.', inputSchema: { json: args.schema as never } } }],
+          toolChoice: { tool: { name: args.name } },
+        },
+      },
+      ctx,
+    );
+    const use = (res.output?.message?.content ?? []).find((c) => 'toolUse' in c && c.toolUse);
+    if (!use || !('toolUse' in use) || !use.toolUse?.input) throw new Error(`Bedrock returned no structured answer (stopReason ${res.stopReason})`);
+    return use.toolUse.input;
+  }
+
+  private async converse(args: { system: string; prompt: string; maxTokens: number; fast?: boolean }, extra: Partial<ConverseInput>, ctx: ProviderContext) {
     if (!this.client) throw new Error('Bedrock is not configured (AWS_REGION + BEDROCK_MODEL_ID)');
     const configured = (args.fast && this.fastModelId) || this.modelId!;
     const send = (modelId: string) =>
@@ -45,6 +78,7 @@ export class BedrockLlm implements Llm {
           messages: [{ role: 'user', content: [{ text: args.prompt }] }],
           // No temperature: newer Claude models reject it as deprecated.
           inferenceConfig: { maxTokens: args.maxTokens },
+          ...extra,
         }),
       );
     const modelId = this.profiled.get(configured) ?? configured;
@@ -61,8 +95,6 @@ export class BedrockLlm implements Llm {
       this.profiled.set(configured, viaGlobal);
     }
     ctx.recordTokens(res.usage?.inputTokens ?? 0, res.usage?.outputTokens ?? 0, configured === this.fastModelId);
-    const text = (res.output?.message?.content ?? []).map((c) => ('text' in c ? c.text : '')).join('');
-    if (!text) throw new Error(`Bedrock returned no text (stopReason ${res.stopReason})`);
-    return text;
+    return res;
   }
 }
