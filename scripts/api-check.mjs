@@ -121,7 +121,8 @@ if (verificationOn) {
   });
 }
 await step('Forgot password: same answer for an unknown email', async () => {
-  const { data } = await call('POST', '/auth/forgot-password', { body: { email: email('nobody') } });
+  const { status, data } = await call('POST', '/auth/forgot-password', { body: { email: email('nobody') }, expect: verificationOn ? [200] : [200, 503] });
+  if (status === 503) return { warn: 'Password reset is off until EMAIL_FROM (Amazon SES) is set' };
   if (!data?.sent) throw new Error('Unexpected reply');
 });
 await step('Forgot password: a wrong code is rejected', async () => {
@@ -129,16 +130,18 @@ await step('Forgot password: a wrong code is rejected', async () => {
 });
 
 // Trips need a verified account; the docs login can create one (the script can't read email).
-let verified = false;
-if (DOCS) {
+let verified = !verificationOn; // without email verification, the new account can plan trips already
+if (!verified && DOCS) {
   verified = await step('Verify email: verified test account', async () => {
     const { data } = await call('POST', '/health/test-account', { auth: DOCS });
     token = data.token;
     token2 = (await call('POST', '/health/test-account', { auth: DOCS })).data.token;
     return data.user.email;
   });
-} else {
+} else if (!verified) {
   log('SKIP', 'Trips, planning and sharing', 'need a verified account: set DOCS_USERNAME and DOCS_PASSWORD');
+} else {
+  token2 = (await call('POST', '/auth/register', { body: { email: email('b'), password } })).data.token;
 }
 if (verified) {
 
