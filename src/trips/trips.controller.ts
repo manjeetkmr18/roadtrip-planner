@@ -1,14 +1,14 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { TravelOptionsQuery, TripRequest } from '../core/index.js';
-import { CurrentUser, JwtGuard, type AuthUser } from '../auth/auth.js';
+import { CurrentUser, VerifiedGuard, type AuthUser } from '../auth/auth.js';
 import { ZodPipe } from '../common/zod.pipe.js';
 import { TripsService } from './trips.service.js';
 
 const Nearby = z.object({ lat: z.coerce.number(), lng: z.coerce.number(), radiusKm: z.coerce.number().default(25) });
 
 @Controller('trips')
-@UseGuards(JwtGuard)
+@UseGuards(VerifiedGuard)
 export class TripsController {
   constructor(private readonly trips: TripsService) {}
 

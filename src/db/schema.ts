@@ -9,8 +9,27 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   name: text('name'),
   plan: text('plan').notNull().default('free'), // free | pro
+  /** Set once the user enters the code emailed at sign-up (or resets their password). */
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** One-time 6-digit codes for email verification and password resets (only a hash is stored). */
+export const authCodes = pgTable(
+  'auth_codes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    purpose: text('purpose').notNull(), // verify_email | reset_password
+    codeHash: text('code_hash').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('auth_codes_user_idx').on(t.userId, t.purpose)],
+);
 
 export const trips = pgTable(
   'trips',

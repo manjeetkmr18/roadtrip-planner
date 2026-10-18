@@ -50,6 +50,11 @@ export const EnvSchema = z.object({
   /** Postgres pool size. Serverless functions should keep this small (use Neon's pooled URL). */
   DB_POOL_MAX: z.coerce.number().int().min(1).max(50).optional(),
 
+  /** Sender for verification and password-reset emails, e.g. "Travlio <no-reply@travlio.app>" (Amazon SES). */
+  EMAIL_FROM: optional,
+  /** SES region; defaults to AWS_REGION. The sending domain must be verified in SES in this region. */
+  SES_REGION: optional,
+
   /** API docs at /api/docs are only served when both are set, behind HTTP Basic auth. */
   DOCS_USERNAME: optional,
   DOCS_PASSWORD: optional.refine((v) => !v || v.length >= 12, 'DOCS_PASSWORD must be at least 12 characters'),

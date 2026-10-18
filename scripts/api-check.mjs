@@ -101,6 +101,47 @@ await step('Security: trips need a sign-in', async () => {
   await call('GET', '/trips', { expect: [401] });
 });
 
+// 2b. Email verification and password reset
+let verificationOn = true;
+await step('Verify email: new accounts start unverified', async () => {
+  const { data } = await call('GET', '/auth/me', { token });
+  if (data.emailVerified !== false) {
+    verificationOn = false;
+    return { warn: 'Email verification is off on this server: set EMAIL_FROM (Amazon SES) to turn it on' };
+  }
+});
+if (verificationOn) {
+  await step('Verify email: trips wait for the code', async () => {
+    const { data } = await call('GET', '/trips', { token, expect: [403] });
+    if (data?.code !== 'EMAIL_NOT_VERIFIED') throw new Error(`Got ${JSON.stringify(data).slice(0, 120)}`);
+  });
+  await step('Verify email: a wrong code is rejected', async () => {
+    const { data } = await call('POST', '/auth/verify-email', { token, body: { code: '000000' }, expect: [400] });
+    return data?.message;
+  });
+}
+await step('Forgot password: same answer for an unknown email', async () => {
+  const { data } = await call('POST', '/auth/forgot-password', { body: { email: email('nobody') } });
+  if (!data?.sent) throw new Error('Unexpected reply');
+});
+await step('Forgot password: a wrong code is rejected', async () => {
+  await call('POST', '/auth/reset-password', { body: { email: userEmail, code: '000000', password: 'another-password-1' }, expect: [400] });
+});
+
+// Trips need a verified account; the docs login can create one (the script can't read email).
+let verified = false;
+if (DOCS) {
+  verified = await step('Verify email: verified test account', async () => {
+    const { data } = await call('POST', '/health/test-account', { auth: DOCS });
+    token = data.token;
+    token2 = (await call('POST', '/health/test-account', { auth: DOCS })).data.token;
+    return data.user.email;
+  });
+} else {
+  log('SKIP', 'Trips, planning and sharing', 'need a verified account: set DOCS_USERNAME and DOCS_PASSWORD');
+}
+if (verified) {
+
 // 3. Getting there (drive vs fly)
 await step('Getting there: Toronto → Calgary suggests fly + drive with flights', async () => {
   const { data, ms } = await call('POST', '/trips/travel-options', {
@@ -212,8 +253,6 @@ if (plan) {
   });
 } else log('SKIP', 'Sharing: the link opens without signing in', 'no plan to share (planning failed above)');
 await step('Privacy: another user cannot open this trip', async () => {
-  const { data } = await call('POST', '/auth/register', { body: { email: email('b'), password } });
-  token2 = data.token;
   await call('GET', `/trips/${tripId}`, { token: token2, expect: [403, 404] });
 });
 await step('Feedback: report incorrect info', async () => {
@@ -229,6 +268,7 @@ await step('Usage counter', async () => {
   if (data.usedThisMonth < 1) throw new Error(`usedThisMonth is ${data.usedThisMonth} after planning a trip`);
   return `${data.usedThisMonth}${data.limit != null ? ` of ${data.limit}` : ''} plans this month`;
 });
+}
 
 // 6. Docs and integrations (behind the docs login)
 await step('Docs: protected', async () => {
@@ -252,7 +292,7 @@ if (DOCS) {
 }
 
 // 7. Clean up
-await step('Clean up: delete the trip', async () => {
+if (verified) await step('Clean up: delete the trip', async () => {
   await call('DELETE', `/trips/${tripId}`, { token });
   await call('GET', `/trips/${tripId}`, { token, expect: [404] });
 });

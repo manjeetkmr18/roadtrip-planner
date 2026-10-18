@@ -86,6 +86,7 @@ Travlio does not book flights; each flight links to the same search on Google Fl
 |---|---|---|
 | `GOOGLE_MAPS_API_KEY` | Geocoding, Routes, Places (New), including the place-field suggestions (`GET /api/places/autocomplete`) | Server key: API restrictions only (Vercel has no fixed IPs). Never a website/referrer-restricted key; Google rejects those from servers |
 | `DUFFEL_ACCESS_TOKEN` | Real flights for fly + drive | Optional; searching is free. Without it, flights are sample data |
+| `EMAIL_FROM` (+ `SES_REGION`) | Sign-up verification codes and password resets via Amazon SES, e.g. `Travlio <no-reply@travlio.app>` | Uses the AWS credentials. Until it's set on Vercel, email verification is off. Locally, emails are printed in the API log |
 | `AWS_REGION`, `BEDROCK_MODEL_ID` + AWS credentials | Stop choice and day descriptions | Model must be enabled in Bedrock |
 | `ONTARIO_511_API_KEY` | Road closures | Free key from 511on.ca |
 | `OILPRICEAPI_KEY`, `EIA_API_KEY` | Current fuel prices (Canada / US) | Free tiers; otherwise labelled defaults |
@@ -95,6 +96,19 @@ Weather (Environment Canada, NWS, MET Norway, NASA POWER) and travel advisories 
 ### Things to verify with your accounts
 
 - **Google pricing:** the cost meter in `src/providers/infra.ts` uses list prices: Compute Routes Essentials $5/1k (no toll prices are requested; check whether alternative routes bill as Pro on your account), Places Text Search Enterprise (rating + opening hours) $35/1k. It ignores free monthly allowances and volume discounts, so it reads high. Confirm in your billing console.
+
+## Accounts: email verification and password reset
+
+- Sign-up emails a 6-digit code (valid 30 min). Trips (`/api/trips/*`) answer `403 EMAIL_NOT_VERIFIED` until it's entered (`POST /api/auth/verify-email`). Accounts made before this existed count as verified.
+- `POST /api/auth/forgot-password` emails a reset code (15 min); `POST /api/auth/reset-password` takes email + code + new password. The reply is the same whether or not the email has an account.
+- Codes are stored hashed, die after 5 wrong tries, and a new one can be sent once a minute.
+- The database changes (`users.email_verified_at`, `auth_codes`) are in `drizzle/0001_email_codes.sql` and are also applied automatically on first use.
+
+**Amazon SES setup (one time):**
+1. SES console (same region as `AWS_REGION`, or set `SES_REGION`) → **Identities → Create identity → Domain** `travlio.app`. Add the 3 DKIM CNAME records it shows to your DNS, and wait until it says *Verified*.
+2. **Account dashboard → Request production access** (new accounts can only send to verified addresses until approved).
+3. Give the `travlio.app` IAM user `ses:SendEmail` (and `ses:GetAccount` for the health check).
+4. Set `EMAIL_FROM=Travlio <no-reply@travlio.app>` on the Vercel project and redeploy.
 
 ## Running costs per trip plan
 

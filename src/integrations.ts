@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, NotFoundException, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, HttpCode, Inject, NotFoundException, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { sql } from 'drizzle-orm';
 import { Redis } from 'ioredis';
@@ -6,6 +6,7 @@ import { addDays, encodePolyline } from './core/index.js';
 import { DB, type Db } from './db/db.module.js';
 import { ENV, type Env } from './config/env.js';
 import { basicAuthOk } from './docs.js';
+import { AuthService } from './auth/auth.js';
 import { airportByIata } from './providers/airports.js';
 import { fetchJson, ProviderContext } from './providers/infra.js';
 import { Providers } from './providers/providers.module.js';
@@ -49,16 +50,29 @@ export class IntegrationsController {
     @Inject(DB) private readonly db: Db,
     @Inject(ENV) private readonly env: Env,
     private readonly p: Providers,
+    private readonly auth: AuthService,
   ) {}
 
-  @Get('integrations')
-  async integrations(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  private docsAuth(req: Request, res: Response) {
     const { DOCS_USERNAME: u, DOCS_PASSWORD: pw } = this.env;
     if (!u || !pw) throw new NotFoundException();
     if (!basicAuthOk(req.headers.authorization, u, pw)) {
       res.setHeader('WWW-Authenticate', 'Basic realm="Travlio API docs", charset="UTF-8"');
       throw new UnauthorizedException('Use the API docs username and password');
     }
+  }
+
+  /** A verified throwaway account so `npm run check:api` can test trips without reading email. */
+  @Post('test-account')
+  @HttpCode(201)
+  testAccount(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    this.docsAuth(req, res);
+    return this.auth.testAccount();
+  }
+
+  @Get('integrations')
+  async integrations(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    this.docsAuth(req, res);
     res.setHeader('Cache-Control', 'no-store');
     const results = await this.checkAll();
     return {
@@ -176,6 +190,14 @@ export class IntegrationsController {
         const offers = await p.flights.search(airportByIata('YYZ')!, airportByIata('YUL')!, addDays(today(), 21), 1, ctx());
         if (!offers.length) throw new Error('No offers for YYZ → YUL in 3 weeks');
         return `${offers.length} offers YYZ → YUL${p.flights.live ? '' : ' (test mode token)'}, from ${Math.min(...offers.map((o) => o.price ?? Infinity))} ${offers[0].currency}`;
+      }),
+      run('Email (Amazon SES)', async () => {
+        if (!env.EMAIL_FROM) off('EMAIL_FROM not set: email verification is off and password resets can\'t be emailed');
+        const { SESv2Client, GetAccountCommand } = await import('@aws-sdk/client-sesv2');
+        const a = await new SESv2Client({ region: env.SES_REGION ?? env.AWS_REGION }).send(new GetAccountCommand({}));
+        if (!a.ProductionAccessEnabled) throw new Error('SES is in sandbox mode: it only sends to verified addresses. Request production access in the SES console.');
+        if (!a.SendingEnabled) throw new Error('SES sending is disabled for this account');
+        return `production access, sending from ${env.EMAIL_FROM}`;
       }),
       run('Exchange rate (Bank of Canada)', async () => {
         const r = await fetchJson<{ observations: { d: string; FXUSDCAD: { v: string } }[] }>('Bank of Canada', 'https://www.bankofcanada.ca/valet/observations/FXUSDCAD/json?recent=1', { timeoutMs: 8_000 });
