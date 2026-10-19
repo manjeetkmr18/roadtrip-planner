@@ -131,64 +131,158 @@ Priority levels: **P0** critical security/data integrity; **P1** resolve before 
 - [ ] Introduce sponsorships/ads only after retention is validated.
 - [ ] Review provider costs and margins monthly.
 
-## 4. Proposed NestJS backend structure
+## 4. Recommended NestJS backend structure
 
-This is a target structure. Prefer a modular monolith until team size or operational needs justify separate services.
+### 4.1 Design principle
 
-\`\`\`text
+Use a **modular monolith organised around the code that already exists**. The current application uses NestJS, Drizzle ORM, PostgreSQL/PostGIS, Zod validation, and BullMQ/Redis support. Do not introduce TypeORM-style repositories/entities, duplicate the domain layer, or create a directory for every class just to make the tree look enterprise-ready.
+
+Keep the current working modules and refactor incrementally. The tree below is the **target after gradual cleanup**, not a requirement to move every file in one large change.
+
+### 4.2 Target structure
+
+```text
 src/
 ├── main.ts
 ├── app.module.ts
-├── config/ (configuration.ts, env.schema.ts, config.module.ts)
-├── common/ (decorators, guards, interceptors, filters, pipes, errors, logging, utils)
-├── database/ (database.module.ts, migrations, repositories, transaction)
-├── cache/redis/
-├── queue/ (queue.module.ts, queue-health.service.ts)
-├── auth/ (auth.module.ts, auth.controller.ts, auth.service.ts, strategies, guards, dto, email-verification, tests)
-├── users/ (users.module.ts, users.controller.ts, users.service.ts, entities, repositories, dto)
-├── trips/ (trips.module.ts, trips.controller.ts, trips.service.ts, entities, repositories, policies, dto)
-├── trip-planning/ (trip-planning.module.ts, controller, service, orchestration, route-legs, stop-candidates, itinerary, dto, tests)
-├── generation/
-│   ├── generation.module.ts
-│   ├── generation.controller.ts
-│   ├── generation.service.ts
-│   ├── generation-state.machine.ts
-│   ├── generation.repository.ts
-│   ├── generation-usage.service.ts
-│   ├── jobs/ (generation.processor.ts, generation.queue.ts, generation-recovery.service.ts, generation-outbox.service.ts)
-│   └── tests/
+│
+├── config/
+│   └── env.ts                    # Environment schema, parsing and validation
+│
+├── common/
+│   ├── rate-limit.ts
+│   ├── zod.pipe.ts
+│   ├── errors/                   # Add only shared error mapping when needed
+│   └── logging/                  # Add request/correlation IDs when implemented
+│
+├── db/
+│   ├── db.module.ts              # Drizzle/Postgres connection and DB token
+│   ├── schema.ts                 # Drizzle table definitions
+│   └── migrate.ts
+│
+├── auth/
+│   ├── auth.ts                   # Auth module/controller/service initially
+│   ├── auth-schema.ts            # Auth-specific validation schemas
+│   └── mailer.ts
+│
+├── users/                        # Extract when user/profile logic grows
+│   ├── users.module.ts
+│   ├── users.controller.ts
+│   └── users.service.ts
+│
+├── trips/
+│   ├── trips.module.ts
+│   ├── trips.controller.ts
+│   ├── trips.service.ts
+│   ├── generation/               # Generation use cases and lifecycle
+│   │   ├── generation.service.ts
+│   │   ├── generation.processor.ts
+│   │   └── generation-recovery.service.ts
+│   └── dto/                      # Request/response schemas only when useful
+│
+├── planning/
+│   ├── planner.ts                # Application-level planning orchestration
+│   ├── stops.ts
+│   ├── travel-options.ts
+│   ├── route-costs.ts
+│   └── fly-drive.ts
+│
+├── core/                         # Framework-independent domain algorithms/types
+│   ├── types.ts
+│   ├── itinerary.ts
+│   ├── feasibility.ts
+│   ├── costs.ts
+│   ├── geo.ts
+│   ├── time.ts
+│   ├── timezone.ts
+│   ├── weather.ts
+│   └── sun.ts
+│
 ├── providers/
-│   ├── google-maps/ (geocoding.client.ts, routes.client.ts, places.client.ts, autocomplete.client.ts, mapper, errors)
-│   └── bedrock/ (bedrock.client.ts, model-selection.service.ts, token-usage.mapper.ts)
-├── usage/ (usage.module.ts, usage-event.entity.ts, usage-meter.service.ts, cost-estimator.service.ts, budget-guard.service.ts)
-├── membership/
+│   ├── providers.module.ts
+│   ├── google.ts
+│   ├── place-search.ts
+│   ├── weather.ts
+│   ├── flights.ts
+│   ├── fx.ts
+│   ├── llm.ts
+│   └── ...                       # Keep existing provider adapters together
+│
+├── integrations.ts               # Temporary home; split by responsibility below
+├── feedback/                     # Extract from misc.ts
+│   ├── feedback.controller.ts
+│   └── feedback.module.ts
+├── places/                       # Extract place autocomplete/details from misc.ts
+│   ├── places.controller.ts
+│   └── places.module.ts
+├── health/                       # Add a small health module if health routes need it
+│
+├── membership/                   # Add when membership work starts
 │   ├── membership.module.ts
 │   ├── membership.controller.ts
 │   ├── membership.service.ts
-│   ├── membership.repository.ts
-│   ├── plans/ (plan.catalog.ts, plan.types.ts)
-│   ├── entitlements/ (entitlement.service.ts, entitlement.guard.ts, entitlement.types.ts)
-│   ├── quotas/ (quota.service.ts, quota.repository.ts, quota.types.ts)
-│   ├── subscriptions/ (subscription.entity.ts, subscription.state-machine.ts, reconciliation service)
-│   ├── billing/ (billing-provider.interface.ts, billing.service.ts, webhook.controller.ts, webhook.service.ts, providers)
-│   ├── dto/
-│   └── tests/
-├── saved-stops/
-├── sharing/
-├── feedback/
-├── places/
-├── health/
-└── analytics/
-\`\`\`
+│   ├── entitlements.service.ts
+│   ├── quota.service.ts
+│   ├── billing/
+│   │   ├── billing-provider.interface.ts
+│   │   ├── webhook.controller.ts
+│   │   └── webhook.service.ts
+│   └── dto/
+│
+└── analytics/                    # Only when product analytics has real use cases
+```
 
-### Architecture rules
+### 4.3 Responsibilities and boundaries
 
-- Controllers handle HTTP; services implement use cases; repositories own persistence.
-- Provider adapters do not make membership or quota decisions.
-- Enforce entitlements in backend use cases, not just UI or controller guards.
-- Keep domain types separate from raw Google/Bedrock payloads.
-- Avoid unnecessary abstractions; define boundaries for providers, persistence, billing and meaningful business capabilities.
-- Keep migrations and runbooks versioned; refactor in small tested steps.
+| Area | Owns | Must not own |
+|---|---|---|
+| `auth` | Registration, login, email verification, password reset, JWT/session validation | Trip planning or billing decisions |
+| `users` | User profile and account lifecycle | Password verification implementation duplicated from auth |
+| `trips` | Trip CRUD, ownership, sharing policy and persisted trip state | Raw Google/LLM request construction |
+| `trips/generation` | Starting generation, job state transitions, retries/recovery and generation records | Provider-specific HTTP details |
+| `planning` | Use-case orchestration for route, candidate stops, costs and itinerary assembly | HTTP controllers or direct client response formatting |
+| `core` | Pure algorithms, domain types, calculations and deterministic validation | NestJS decorators, database queries or external API calls |
+| `providers` | Google, weather, flight, FX and LLM adapters; normalized responses/errors | User entitlements, quota policy or trip ownership |
+| `db` | Drizzle connection, schema and migrations | Business workflows or HTTP logic |
+| `membership` | Plans, subscriptions, entitlements, quota policy and billing webhook orchestration | Trusting a client-provided `isPro`/plan value |
+| `common` | Small, genuinely cross-cutting NestJS utilities | Feature-specific business logic |
+
+### 4.4 Specific changes from the current code
+
+1. **Keep Drizzle as the persistence approach.** The current schema is in `src/db/schema.ts`; use Drizzle queries and typed database helpers. Do not add TypeORM entities or a repository class for every table by default.
+2. **Keep `core/` framework-independent.** Continue placing pure routing, feasibility, cost, itinerary and time calculations there. It should not import NestJS, Drizzle, Redis, Google SDKs or Bedrock clients.
+3. **Keep `planning/` separate from `trips/`.** Planning builds a plan; trips owns the saved trip and its lifecycle. The generation workflow coordinates the two.
+4. **Split `misc.ts` by responsibility, not by arbitrary class count.** Move feedback endpoints into `feedback/` and place search/details endpoints into `places/`; register the new modules in `app.module.ts`. Preserve existing routes and response shapes during the move. Keep integrations in their own module only where they are a distinct feature.
+5. **Avoid a premature `users/` module.** Extract it when profile/account operations justify the boundary; authentication can continue owning login and verification meanwhile.
+6. **Keep queue code beside generation.** Reuse the existing BullMQ/Redis configuration. Do not create a generic queue abstraction until a second real use case needs it.
+7. **Add membership only when implementing it.** First settle the billing provider and web/native purchase surfaces. Keep subscription state and quota enforcement server-side, and make quota reservation atomic with generation admission.
+8. **Do not add empty folders for hypothetical features.** Add health, analytics, saved-stops or sharing modules when there is actual route/domain behavior to move into them.
+
+### 4.5 Dependency direction
+
+```text
+HTTP controllers
+      ↓
+Feature use cases (trips, generation, membership, places, feedback)
+      ↓
+Planning/domain logic (planning → core)
+      ↓
+Provider adapters and database access
+```
+
+This is a dependency guide, not a requirement for every feature to have every layer. In particular, `core/` must remain independent of infrastructure. Providers and persistence should be called through focused services from use cases; provider adapters must not import trip or membership policy.
+
+### 4.6 Safe migration order
+
+- [ ] **Step 1:** Add or improve tests around the existing `misc.ts` routes and module registration.
+- [ ] **Step 2:** Extract `FeedbackModule` without changing endpoint contracts.
+- [ ] **Step 3:** Extract `PlacesModule` and its validation/provider calls.
+- [ ] **Step 4:** Move generation-specific queue lifecycle and recovery out of generic trip CRUD only where the current code has clear boundaries; preserve existing BullMQ behavior.
+- [ ] **Step 5:** Keep `core/` pure and add import-boundary checks if practical.
+- [ ] **Step 6:** Introduce membership schema/services in a separate migration and feature change after billing decisions are made.
+- [ ] **Step 7:** Revisit `users/`, `health/` and `analytics/` only when their responsibilities justify separate modules.
+
+Each step should build, type-check and pass tests before the next one begins. Do not combine this refactor with a billing-provider migration or a wholesale database rewrite.
 
 ## 5. Membership product proposal
 
