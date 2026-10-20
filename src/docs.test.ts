@@ -1,6 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { buildOpenApi, docsAuth } from './docs.js';
+import { Controller, Get, Module } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { ApiEndpoint } from './common/api-docs.decorator.js';
+import { buildOpenApi, docsAuth, mergeOpenApiDocuments } from './docs.js';
 import { loadEnv } from './config/env.js';
+
+class DecoratorTestController {
+  protectedEndpoint() {
+    return { ok: true };
+  }
+}
+
+class DecoratorTestModule {}
+
+Get('protected')(
+  DecoratorTestController.prototype,
+  'protectedEndpoint',
+  Object.getOwnPropertyDescriptor(DecoratorTestController.prototype, 'protectedEndpoint')!,
+);
+ApiEndpoint({ tag: 'Decorator test', summary: 'Generated endpoint summary', security: 'bearer', errors: [401, 403] })(
+  DecoratorTestController.prototype,
+  'protectedEndpoint',
+  Object.getOwnPropertyDescriptor(DecoratorTestController.prototype, 'protectedEndpoint')!,
+);
+Controller('decorator-test')(DecoratorTestController);
+Module({ controllers: [DecoratorTestController] })(DecoratorTestModule);
 
 function call(header?: string) {
   const res = { code: 0, headers: {} as Record<string, string>, setHeader(k: string, v: string) { this.headers[k] = v; }, status(c: number) { this.code = c; return this; }, send() { return this; } };
@@ -11,6 +36,47 @@ function call(header?: string) {
 const basic = (u: string, p: string) => `Basic ${Buffer.from(`${u}:${p}`).toString('base64')}`;
 
 describe('API docs', () => {
+  it('generates operation, bearer security, and common errors from ApiEndpoint', async () => {
+    const app = await NestFactory.create(DecoratorTestModule, { logger: false });
+    app.setGlobalPrefix('api');
+    try {
+      const generated = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder()
+          .setTitle('Test')
+          .setVersion('1')
+          .addBearerAuth({ type: 'http', scheme: 'bearer' }, 'bearer')
+          .build(),
+      );
+      const operation = generated.paths['/api/decorator-test/protected']?.get;
+
+      expect(operation).toMatchObject({
+        summary: 'Generated endpoint summary',
+        tags: ['Decorator test'],
+        security: [{ bearer: [] }],
+      });
+      expect(operation?.responses).toHaveProperty('401');
+      expect(operation?.responses).toHaveProperty('403');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps curated endpoint details and includes new routes discovered from Swagger decorators', () => {
+    const curated = buildOpenApi();
+    const generated = {
+      ...curated,
+      paths: {
+        '/api/future': { get: { summary: 'Generated from ApiEndpoint' } },
+        '/api/trips': { get: { summary: 'Generated summary' } },
+      },
+    } as unknown as typeof curated;
+    const merged = mergeOpenApiDocuments(generated, curated);
+
+    expect(merged.paths['/api/future']).toEqual(generated.paths['/api/future']);
+    expect(merged.paths['/api/trips']).toEqual(curated.paths['/api/trips']);
+  });
+
   it('asks for a password without credentials or with wrong ones', () => {
     for (const h of [undefined, basic('travlio', 'wrong'), basic('admin', 'correct-horse-battery'), 'Bearer abc']) {
       const r = call(h);

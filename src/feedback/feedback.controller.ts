@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { AuthModule, CurrentUser, JwtGuard, type AuthUser } from '../auth/auth.js';
 import { ZodPipe } from '../common/zod.pipe.js';
+import { ApiEndpoint } from '../common/api-docs.decorator.js';
 import { DB, type Db } from '../db/db.module.js';
 import { feedback, trips } from '../db/schema.js';
 
@@ -20,6 +21,7 @@ export class FeedbackController {
   /** "Report incorrect info" from the cost report, a stop, or a weather card. */
   @Post()
   @UseGuards(JwtGuard)
+  @ApiEndpoint({ tag: 'Feedback', summary: 'Submit a report about incorrect trip information', security: 'bearer', response: { status: 201, description: 'Feedback received' }, errors: [400, 401, 404] })
   async create(@CurrentUser() user: AuthUser, @Body(new ZodPipe(Feedback)) body: z.infer<typeof Feedback>) {
     if (body.tripId) {
       const trip = await this.db.query.trips.findFirst({

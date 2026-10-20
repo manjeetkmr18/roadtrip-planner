@@ -2,6 +2,7 @@ import { Controller, Get, Inject } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/db.module.js';
 import { ENV, type Env } from '../config/env.js';
+import { ApiEndpoint } from '../common/api-docs.decorator.js';
 
 @Controller('health')
 export class HealthController {
@@ -12,6 +13,7 @@ export class HealthController {
 
   /** Which integrations are live, so setup problems are visible at a glance. */
   @Get()
+  @ApiEndpoint({ tag: 'Health', summary: 'Check API and database health without provider calls' })
   async health() {
     let db = false;
     try {
