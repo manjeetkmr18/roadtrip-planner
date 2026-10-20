@@ -11,6 +11,7 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   name: text('name'),
   plan: text('plan').notNull().default('free'), // free | pro
+  role: text('role').notNull().default('user'),
   stripeCustomerId: text('stripe_customer_id').unique(),
   /** Set once the user enters the code emailed at sign-up (or resets their password). */
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
@@ -47,6 +48,39 @@ export const membershipWebhookEvents = pgTable('membership_webhook_events', {
   eventType: text('event_type').notNull(),
   processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const complimentaryMembershipGrants = pgTable(
+  'complimentary_membership_grants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    grantedByUserId: text('granted_by_user_id').notNull(),
+    reason: text('reason').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedByUserId: text('revoked_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('complimentary_membership_grants_user_expiry_idx').on(t.userId, t.expiresAt),
+    index('complimentary_membership_grants_active_idx').on(t.userId, t.revokedAt, t.expiresAt),
+  ],
+);
+
+export const adminAuditLogs = pgTable(
+  'admin_audit_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    actorUserId: text('actor_user_id').notNull(),
+    action: text('action').notNull(),
+    targetUserId: text('target_user_id'),
+    details: jsonb('details').$type<Record<string, string | number | boolean | null>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('admin_audit_logs_created_idx').on(t.createdAt), index('admin_audit_logs_target_idx').on(t.targetUserId, t.createdAt)],
+);
 
 /** One-time 6-digit codes for email verification and password resets (only a hash is stored). */
 export const authCodes = pgTable(

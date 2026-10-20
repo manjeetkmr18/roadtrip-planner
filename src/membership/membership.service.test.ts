@@ -24,7 +24,7 @@ describe('MembershipService', () => {
       cancelAtPeriodEnd: true,
     };
     const findFirst = vi.fn(async () => subscription);
-    const service = new MembershipService({ query: { membershipSubscriptions: { findFirst } } } as unknown as Db, loadEnv({}));
+    const service = new MembershipService({ query: { membershipSubscriptions: { findFirst }, complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) } } } as unknown as Db, loadEnv({}));
 
     await expect(service.me(user)).resolves.toMatchObject({
       plan: 'pro',
@@ -35,7 +35,7 @@ describe('MembershipService', () => {
     const canceledFindFirst = vi.fn(async () => latestCanceled as typeof subscription | undefined);
     canceledFindFirst.mockResolvedValueOnce(undefined);
     const canceledService = new MembershipService(
-      { query: { membershipSubscriptions: { findFirst: canceledFindFirst } } } as unknown as Db,
+      { query: { membershipSubscriptions: { findFirst: canceledFindFirst }, complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) } } } as unknown as Db,
       loadEnv({}),
     );
     await expect(canceledService.me(user)).resolves.toMatchObject({ plan: 'free', subscription: { status: 'canceled' } });
@@ -44,7 +44,7 @@ describe('MembershipService', () => {
   it('allows arrival adjustments only with a current entitled subscription', async () => {
     const findFirst = vi.fn(async () => ({ id: 'subscription-1' }));
     const service = new MembershipService(
-      { query: { membershipSubscriptions: { findFirst } } } as unknown as Db,
+      { query: { membershipSubscriptions: { findFirst }, complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) } } } as unknown as Db,
       loadEnv({}),
     );
 
@@ -61,6 +61,21 @@ describe('MembershipService', () => {
     }));
   });
 
+  it('recognizes a current complimentary grant as Pro', async () => {
+    const service = new MembershipService({
+      query: {
+        membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
+        complimentaryMembershipGrants: { findFirst: vi.fn(async () => ({ id: 'grant-1' })) },
+      },
+    } as unknown as Db, loadEnv({}));
+
+    await expect(service.assertPro(user)).resolves.toBeUndefined();
+    await expect(service.me(user)).resolves.toMatchObject({
+      plan: 'pro',
+      subscription: { plan: 'complimentary', status: 'active' },
+    });
+  });
+
   it('reports completed and reserved monthly usage from server-side records', async () => {
     const db = {
       select: vi.fn(() => ({
@@ -68,7 +83,10 @@ describe('MembershipService', () => {
           where: async () => [{ n: table === generations ? 2 : table === generationJobs ? 1 : 0 }],
         }),
       })),
-      query: { users: { findFirst: vi.fn(async () => ({ plan: 'free' })) } },
+      query: {
+        membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
+        complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
+      },
     } as unknown as Db;
     const service = new MembershipService(db, loadEnv({ FREE_TRIPS_PER_MONTH: '3' }));
 
@@ -112,6 +130,7 @@ describe('MembershipService', () => {
       query: {
         users: { findFirst: vi.fn(async () => ({ id: user.id })) },
         membershipSubscriptions: { findFirst: vi.fn(async () => ({ status: 'active' })) },
+        complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
       },
       update: (table: unknown) => ({
         set: vi.fn((values: { plan: string }) => ({

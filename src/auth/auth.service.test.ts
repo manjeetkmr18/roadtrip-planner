@@ -76,6 +76,42 @@ describe('AuthService email codes', () => {
     expect(getAttempts()).toBe(5);
   });
 
+  describe('AuthService session', () => {
+    it('returns a token and the current database role and membership tier', async () => {
+      const db = {
+        query: {
+          membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
+          complimentaryMembershipGrants: { findFirst: vi.fn(async () => ({ id: 'grant-1' })) },
+        },
+      } as unknown as Db;
+      const jwt = { sign: vi.fn(() => 'signed-token') } as unknown as JwtService;
+      const auth = new AuthService(db, loadEnv({}), jwt, {} as Mailer);
+      const session = (auth as unknown as {
+        session: (user: {
+          id: string;
+          email: string;
+          name: string | null;
+          plan: string;
+          role: string;
+          emailVerifiedAt: Date | null;
+        }) => Promise<{ token: string; user: { id: string; role: string; plan: string } }>;
+      }).session;
+
+      await expect(session.call(auth, {
+        id: 'user-1',
+        email: 'person@example.com',
+        name: null,
+        plan: 'free',
+        role: 'user',
+        emailVerifiedAt: new Date(),
+      })).resolves.toMatchObject({
+        token: 'signed-token',
+        user: { id: 'user-1', role: 'user', plan: 'pro' },
+      });
+      expect(jwt.sign).toHaveBeenCalledWith(expect.objectContaining({ plan: 'pro' }));
+    });
+  });
+
   it('allows a valid code to be consumed only once under concurrent requests', async () => {
     const { useCode } = serviceWithCodeDb({ code: '123456' });
 

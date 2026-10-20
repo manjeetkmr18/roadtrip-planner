@@ -24,10 +24,10 @@ import {
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import bcrypt from 'bcryptjs';
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
-import { and, eq, gt, lt, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DB, type Db } from '../db/db.module.js';
-import { authCodes, users } from '../db/schema.js';
+import { authCodes, complimentaryMembershipGrants, membershipSubscriptions, users } from '../db/schema.js';
 import { ENV, type Env } from '../config/env.js';
 import { ZodPipe } from '../common/zod.pipe.js';
 import { clientIp, RateLimiter } from '../common/rate-limit.js';
@@ -59,7 +59,7 @@ const MAX_ATTEMPTS = 5;
 const RESEND_SECONDS = 60;
 
 type UserRow = typeof users.$inferSelect;
-const publicUser = (u: UserRow) => ({ id: u.id, email: u.email, name: u.name, plan: u.plan, emailVerified: !!u.emailVerifiedAt });
+const publicUser = (u: UserRow) => ({ id: u.id, email: u.email, name: u.name, plan: u.plan, role: u.role, emailVerified: !!u.emailVerifiedAt });
 
 @Injectable()
 export class AuthService {
@@ -72,12 +72,33 @@ export class AuthService {
     private readonly mailer: Mailer,
   ) {}
 
-  private token(u: UserRow) {
-    return this.jwt.sign({ sub: u.id, email: u.email, plan: u.plan, ev: !!u.emailVerifiedAt });
+  private token(u: UserRow, plan = u.plan) {
+    return this.jwt.sign({ sub: u.id, email: u.email, plan, ev: !!u.emailVerifiedAt });
   }
 
-  private session(u: UserRow) {
-    return { token: this.token(u), user: publicUser(u) };
+  private async userView(u: UserRow) {
+    const [subscription, grant] = await Promise.all([
+      this.db.query.membershipSubscriptions.findFirst({
+        where: and(
+          eq(membershipSubscriptions.userId, u.id),
+          inArray(membershipSubscriptions.status, ['active', 'trialing', 'cancel_pending']),
+          gt(membershipSubscriptions.currentPeriodEnd, new Date()),
+        ),
+      }),
+      this.db.query.complimentaryMembershipGrants.findFirst({
+        where: and(
+          eq(complimentaryMembershipGrants.userId, u.id),
+          isNull(complimentaryMembershipGrants.revokedAt),
+          gt(complimentaryMembershipGrants.expiresAt, new Date()),
+        ),
+      }),
+    ]);
+    return { ...publicUser(u), plan: subscription || grant ? 'pro' : 'free' };
+  }
+
+  private async session(u: UserRow) {
+    const user = await this.userView(u);
+    return { token: this.token(u, user.plan), user };
   }
 
   private hash(purpose: Purpose, userId: string, c: string) {
@@ -164,7 +185,7 @@ export class AuthService {
       codeSent = false;
       this.log.error(`verification email to ${u.email} failed: ${(e as Error).message}`);
     }
-    return { ...this.session(u), codeSent };
+    return { ...(await this.session(u)), codeSent };
   }
 
   async login(c: Credentials) {
@@ -177,7 +198,7 @@ export class AuthService {
     await ensureAuthSchema(this.db);
     const u = await this.db.query.users.findFirst({ where: eq(users.id, id) });
     if (!u) throw new UnauthorizedException('Session expired, please sign in again');
-    return publicUser(u);
+    return this.userView(u);
   }
 
   async isVerified(id: string) {

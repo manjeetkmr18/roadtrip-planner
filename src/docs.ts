@@ -20,8 +20,8 @@ const out = (schema: z.ZodType) => z.toJSONSchema(schema, { io: 'output', unrepr
 
 const Credentials = z.object({ email: z.email(), password: z.string().min(8).max(200), name: z.string().max(80).optional() });
 const Login = Credentials.omit({ name: true });
-const AuthResult = z.object({ token: z.string(), user: z.object({ id: z.uuid(), email: z.string(), name: z.string().nullable().optional(), plan: z.string(), emailVerified: z.boolean().optional() }) });
-const Me = z.object({ id: z.uuid(), email: z.string(), name: z.string().nullable().optional(), plan: z.string(), emailVerified: z.boolean().optional() });
+const AuthResult = z.object({ token: z.string(), user: z.object({ id: z.uuid(), email: z.string(), name: z.string().nullable().optional(), plan: z.string(), role: z.enum(['user', 'admin']), emailVerified: z.boolean().optional() }) });
+const Me = z.object({ id: z.uuid(), email: z.string(), name: z.string().nullable().optional(), plan: z.string(), role: z.enum(['user', 'admin']), emailVerified: z.boolean().optional() });
 const VerifyEmail = z.object({ code: z.string().regex(/^\d{6}$/) });
 const ForgotPassword = z.object({ email: z.email() });
 const ResetPassword = z.object({ email: z.email(), code: z.string().regex(/^\d{6}$/), password: z.string().min(8).max(200) });
@@ -54,6 +54,9 @@ const Feedback = z.object({
   itemId: z.string().max(200).optional(),
   message: z.string().min(3).max(2000),
 });
+const GrantPro = z.object({ expiresAt: z.iso.datetime(), reason: z.string().min(3).max(500) });
+const RevokeGrant = z.object({ reason: z.string().min(3).max(500) });
+const DeleteUser = z.object({ confirmUserId: z.uuid(), reason: z.string().min(3).max(500) });
 const ErrorBody = z.object({ statusCode: z.number(), message: z.unknown(), error: z.string().optional() });
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
@@ -102,6 +105,7 @@ export function buildOpenApi(serverUrl?: string): OpenAPIObject {
       { name: 'Health', description: 'Service health and integration diagnostics' },
       { name: 'Public', description: 'Shared trips and public endpoints (no token)' },
       { name: 'Feedback', description: '"Report incorrect info"' },
+      { name: 'Admin', description: 'Admin-only monitoring, account, membership, billing, and audit APIs' },
     ],
     components: {
       securitySchemes: {
@@ -130,6 +134,9 @@ export function buildOpenApi(serverUrl?: string): OpenAPIObject {
         PlacePhoto: json(PlacePhoto),
         Checkout: json(Checkout),
         Feedback: json(Feedback),
+        GrantPro: json(GrantPro),
+        RevokeGrant: json(RevokeGrant),
+        DeleteUser: json(DeleteUser),
         Error: out(ErrorBody),
       },
     },
@@ -144,6 +151,29 @@ export function buildOpenApi(serverUrl?: string): OpenAPIObject {
       '/api/users/me': {
         get: { tags: ['Users'], summary: 'Get the signed-in user profile', security: secured, responses: { 200: ok('Me'), ...errors(401, 404) } },
         patch: { tags: ['Users'], summary: 'Update the profile name', security: secured, requestBody: body('UpdateProfile'), responses: { 200: ok('Me'), ...errors(400, 401, 404) } },
+      },
+      '/api/admin/overview': { get: { tags: ['Admin'], summary: 'Platform totals, generation usage/cost, and active memberships', security: secured, responses: { 200: result({ type: 'object', additionalProperties: true }), ...errors(401, 403) } } },
+      '/api/admin/users': {
+        get: { tags: ['Admin'], summary: 'Search and page through accounts', description: 'Never returns credentials or password hashes. Query parameters are q, limit (1–100), and offset.', security: secured, parameters: [queryParam('q', { type: 'string' }, false), queryParam('limit', { type: 'integer', minimum: 1, maximum: 100 }, false), queryParam('offset', { type: 'integer', minimum: 0 }, false)], responses: { 200: result({ type: 'object', additionalProperties: true }), ...errors(400, 401, 403) } },
+      },
+      '/api/admin/users/{userId}': {
+        get: { tags: ['Admin'], summary: 'Inspect an account, its trips, subscriptions, grants, and usage', security: secured, parameters: [idParam], responses: { 200: result({ type: 'object', additionalProperties: true }), ...errors(401, 403, 404) } },
+        delete: { tags: ['Admin'], summary: 'Delete an account and its trip data', description: 'Requires confirmUserId to exactly match the path ID and a reason. Cannot delete yourself, the last admin, or an account with a current Stripe subscription. The deletion is recorded in the durable admin audit log.', security: secured, parameters: [idParam], requestBody: body('DeleteUser'), responses: { 200: result(objectResult({ deleted: { type: 'boolean' }, userId: { type: 'string', format: 'uuid' }, tripsAndAccountDataDeleted: { type: 'boolean' } })), ...errors(400, 401, 403, 404, 409) } },
+      },
+      '/api/admin/users/{userId}/pro-grants': {
+        post: { tags: ['Admin'], summary: 'Grant complimentary Pro membership until an expiry date', description: 'Requires a future expiresAt and a reason. The grant is audited and does not create or affect a Stripe subscription.', security: secured, parameters: [idParam], requestBody: body('GrantPro'), responses: { 201: result({ type: 'object', additionalProperties: true }), ...errors(400, 401, 403, 404, 409) } },
+      },
+      '/api/admin/pro-grants/{grantId}/revoke': {
+        post: { tags: ['Admin'], summary: 'Revoke a complimentary Pro membership grant', security: secured, parameters: [{ name: 'grantId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: body('RevokeGrant'), responses: { 201: result(objectResult({ revoked: { type: 'boolean' }, grantId: { type: 'string', format: 'uuid' } })), ...errors(401, 403, 404, 409) } },
+      },
+      '/api/admin/billing': {
+        get: { tags: ['Admin'], summary: 'List Stripe subscription references and status', description: 'Returns billing identifiers and lifecycle state only; it never exposes secret keys or payment credentials.', security: secured, parameters: [queryParam('limit', { type: 'integer', minimum: 1, maximum: 100 }, false), queryParam('offset', { type: 'integer', minimum: 0 }, false)], responses: { 200: result({ type: 'object', additionalProperties: true }), ...errors(401, 403) } },
+      },
+      '/api/admin/audit-logs': {
+        get: { tags: ['Admin'], summary: 'Read the durable admin action log', security: secured, parameters: [queryParam('limit', { type: 'integer', minimum: 1, maximum: 100 }, false), queryParam('offset', { type: 'integer', minimum: 0 }, false)], responses: { 200: result({ type: 'object', additionalProperties: true }), ...errors(401, 403) } },
+      },
+      '/api/admin/feedback': {
+        get: { tags: ['Admin'], summary: 'Review user feedback and linked account references', security: secured, parameters: [queryParam('limit', { type: 'integer', minimum: 1, maximum: 100 }, false), queryParam('offset', { type: 'integer', minimum: 0 }, false)], responses: { 200: result({ type: 'object', additionalProperties: true }), ...errors(401, 403) } },
       },
       '/api/membership/plans': {
         get: { tags: ['Membership'], summary: 'Get configured recurring Stripe prices', description: 'Requires Stripe prices to be configured. Returns monthly and annual price IDs, amount, currency, and interval.', responses: { 200: result({ type: 'array', items: objectResult({ code: { type: 'string' }, priceId: { type: 'string' }, amount: { type: ['number', 'null'] }, currency: { type: 'string' }, interval: { type: 'string' }, intervalCount: { type: 'integer' } }) }), ...errors(503) } },
