@@ -2,6 +2,10 @@
 
 The API exposes a separate `/api/admin` surface for platform monitoring and support. It uses the existing user login flow, but every admin request checks the user's persisted `users.role` in the database. A role claim from a JWT or browser is never accepted as authorization.
 
+The web app exposes the same monitoring and support tools at `/admin` after an administrator signs in. The admin dashboard can inspect users, their trips, membership and usage, review billing references, feedback and audit events, and grant or revoke complimentary Pro access. Frontend role checks control navigation only; every operation remains protected by the API's database-backed admin guard. The dashboard does not impersonate users or grant access to their private trip routes.
+
+Administrator accounts are treated as Pro for API entitlement and free-trip quota checks, based on the persisted role. This allows admins to exercise Pro-only features, including guided arrival adjustments, but trip generation and arrival previews can call paid provider APIs and incur costs.
+
 ## Bootstrap the first admin
 
 1. Deploy the API code and apply database migrations, including `0006_admin_membership`.
@@ -56,4 +60,4 @@ Account deletion requires a JSON body containing the exact target ID and a reaso
 
 The API refuses to delete the signed-in admin, the last admin, or an account with a current Stripe subscription. Cancel the Stripe subscription first. Deletion cascades to that account's local trips, plans, generations, and membership records; Stripe-side records are not deleted by this API.
 
-Admin APIs intentionally do not expose password hashes, JWT secrets, database credentials, or Stripe secret keys. The admin web interface is not part of this API-only change; a future frontend should use the same login token and role returned by `/api/auth/me`, while treating server authorization as authoritative.
+Admin APIs intentionally do not expose password hashes, JWT secrets, database credentials, or Stripe secret keys.

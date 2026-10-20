@@ -9,8 +9,8 @@ import { GenerationQueue, TripsService } from './trips.service.js';
 type TestTrip = { id: string; userId: string; status: 'draft' | 'queued' | 'generating' | 'ready' | 'failed'; title: string; error: null; request: object };
 type TestJob = { id: string; tripId: string; userId: string; status: 'queued' | 'generating' | 'completed' | 'failed' | 'released'; attempts: number; queuedAt: Date; heartbeatAt: Date | null; createdAt: Date };
 
-function harness(queue: GenerationQueue, pro = false, completedGenerations = 0) {
-  const user = { id: 'user-1', plan: 'free' };
+function harness(queue: GenerationQueue, pro = false, completedGenerations = 0, role = 'user') {
+  const user = { id: 'user-1', plan: 'free', role };
   const tripsInDb: TestTrip[] = [
     { id: 'trip-1', userId: user.id, status: 'draft', title: 'Trip 1', error: null, request: {} },
     { id: 'trip-2', userId: user.id, status: 'draft', title: 'Trip 2', error: null, request: {} },
@@ -134,6 +134,26 @@ describe('TripsService generation admission', () => {
 
     await expect(service.requestGeneration(user, 'trip-1')).resolves.toMatchObject({ status: 'queued' });
     expect(queue.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('allows administrators to generate beyond the free-plan quota', async () => {
+    const queue = { enqueue: vi.fn(async () => undefined) } as GenerationQueue;
+    const { service, user } = harness(queue, false, 1, 'admin');
+
+    await expect(service.requestGeneration(user, 'trip-1')).resolves.toMatchObject({ status: 'queued' });
+    expect(queue.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('returns an actionable upgrade error when the free quota is exhausted', async () => {
+    const { service, user } = harness({ enqueue: vi.fn(async () => undefined) } as GenerationQueue, false, 1);
+
+    await expect(service.requestGeneration(user, 'trip-1')).rejects.toMatchObject({
+      status: 402,
+      response: {
+        code: 'FREE_PLAN_LIMIT',
+        message: expect.stringContaining('Upgrade to Travlio Pro'),
+      },
+    });
   });
 });
 

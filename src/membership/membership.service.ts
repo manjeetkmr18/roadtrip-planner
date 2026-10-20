@@ -94,11 +94,12 @@ export class MembershipService {
   }
 
   async hasPro(userId: string) {
-    const [subscription, grant] = await Promise.all([
+    const [account, subscription, grant] = await Promise.all([
+      this.db.query.users.findFirst({ where: eq(users.id, userId), columns: { role: true } }),
       this.activeSubscription(userId),
       this.activeGrant(userId),
     ]);
-    return !!(subscription || grant);
+    return account?.role === 'admin' || !!(subscription || grant);
   }
 
   async plans() {
@@ -112,12 +113,14 @@ export class MembershipService {
   async me(user: AuthUser) {
     const active = await this.activeSubscription(user.id);
     const grant = active ? undefined : await this.activeGrant(user.id);
+    const account = await this.db.query.users.findFirst({ where: eq(users.id, user.id), columns: { role: true } });
     const subscription = active ?? (await this.db.query.membershipSubscriptions.findFirst({
       where: eq(membershipSubscriptions.userId, user.id),
       orderBy: desc(membershipSubscriptions.updatedAt),
     }));
     return {
-      plan: active || grant ? 'pro' : 'free',
+      plan: active || grant || account?.role === 'admin' ? 'pro' : 'free',
+      access: account?.role === 'admin' ? 'admin' : active ? 'subscription' : grant ? 'complimentary' : 'free',
       subscription: active
         ? {
             plan: active.planCode,

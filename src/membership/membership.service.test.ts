@@ -24,7 +24,16 @@ describe('MembershipService', () => {
       cancelAtPeriodEnd: true,
     };
     const findFirst = vi.fn(async () => subscription);
-    const service = new MembershipService({ query: { membershipSubscriptions: { findFirst }, complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) } } } as unknown as Db, loadEnv({}));
+    const service = new MembershipService(
+      {
+        query: {
+          users: { findFirst: vi.fn(async () => ({ role: 'user' })) },
+          membershipSubscriptions: { findFirst },
+          complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
+        },
+      } as unknown as Db,
+      loadEnv({}),
+    );
 
     await expect(service.me(user)).resolves.toMatchObject({
       plan: 'pro',
@@ -35,7 +44,13 @@ describe('MembershipService', () => {
     const canceledFindFirst = vi.fn(async () => latestCanceled as typeof subscription | undefined);
     canceledFindFirst.mockResolvedValueOnce(undefined);
     const canceledService = new MembershipService(
-      { query: { membershipSubscriptions: { findFirst: canceledFindFirst }, complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) } } } as unknown as Db,
+      {
+        query: {
+          users: { findFirst: vi.fn(async () => ({ role: 'user' })) },
+          membershipSubscriptions: { findFirst: canceledFindFirst },
+          complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
+        },
+      } as unknown as Db,
       loadEnv({}),
     );
     await expect(canceledService.me(user)).resolves.toMatchObject({ plan: 'free', subscription: { status: 'canceled' } });
@@ -44,7 +59,13 @@ describe('MembershipService', () => {
   it('allows arrival adjustments only with a current entitled subscription', async () => {
     const findFirst = vi.fn(async () => ({ id: 'subscription-1' }));
     const service = new MembershipService(
-      { query: { membershipSubscriptions: { findFirst }, complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) } } } as unknown as Db,
+      {
+        query: {
+          users: { findFirst: vi.fn(async () => ({ role: 'user' })) },
+          membershipSubscriptions: { findFirst },
+          complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
+        },
+      } as unknown as Db,
       loadEnv({}),
     );
 
@@ -64,6 +85,7 @@ describe('MembershipService', () => {
   it('recognizes a current complimentary grant as Pro', async () => {
     const service = new MembershipService({
       query: {
+        users: { findFirst: vi.fn(async () => ({ role: 'user' })) },
         membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
         complimentaryMembershipGrants: { findFirst: vi.fn(async () => ({ id: 'grant-1' })) },
       },
@@ -84,6 +106,7 @@ describe('MembershipService', () => {
         }),
       })),
       query: {
+        users: { findFirst: vi.fn(async () => ({ role: 'user' })) },
         membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
         complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
       },
@@ -91,6 +114,19 @@ describe('MembershipService', () => {
     const service = new MembershipService(db, loadEnv({ FREE_TRIPS_PER_MONTH: '3' }));
 
     await expect(service.usage(user)).resolves.toMatchObject({ plan: 'free', usedThisMonth: 3, limit: 3 });
+  });
+
+  it('grants administrators Pro access based on their persisted role', async () => {
+    const service = new MembershipService({
+      query: {
+        users: { findFirst: vi.fn(async () => ({ role: 'admin' })) },
+        membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
+        complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
+      },
+    } as unknown as Db, loadEnv({}));
+
+    await expect(service.assertPro(user)).resolves.toBeUndefined();
+    await expect(service.me(user)).resolves.toMatchObject({ plan: 'pro', access: 'admin' });
   });
 
   it('rejects payment operations while Stripe is unconfigured', async () => {

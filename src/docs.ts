@@ -57,7 +57,7 @@ const Feedback = z.object({
 const GrantPro = z.object({ expiresAt: z.iso.datetime(), reason: z.string().min(3).max(500) });
 const RevokeGrant = z.object({ reason: z.string().min(3).max(500) });
 const DeleteUser = z.object({ confirmUserId: z.uuid(), reason: z.string().min(3).max(500) });
-const ErrorBody = z.object({ statusCode: z.number(), message: z.unknown(), error: z.string().optional() });
+const ErrorBody = z.object({ statusCode: z.number(), message: z.unknown(), error: z.string().optional(), code: z.string().optional() });
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 const body = (name: string) => ({ required: true, content: { 'application/json': { schema: ref(name) } } });
@@ -179,7 +179,7 @@ export function buildOpenApi(serverUrl?: string): OpenAPIObject {
         get: { tags: ['Membership'], summary: 'Get configured recurring Stripe prices', description: 'Requires Stripe prices to be configured. Returns monthly and annual price IDs, amount, currency, and interval.', responses: { 200: result({ type: 'array', items: objectResult({ code: { type: 'string' }, priceId: { type: 'string' }, amount: { type: ['number', 'null'] }, currency: { type: 'string' }, interval: { type: 'string' }, intervalCount: { type: 'integer' } }) }), ...errors(503) } },
       },
       '/api/membership/me': {
-        get: { tags: ['Membership'], summary: 'Get effective membership and latest subscription status', security: secured, responses: { 200: result(objectResult({ plan: { type: 'string', enum: ['free', 'pro'] }, subscription: { anyOf: [objectResult({ plan: { type: 'string' }, status: { type: 'string' }, currentPeriodStart: { type: ['string', 'null'], format: 'date-time' }, currentPeriodEnd: { type: ['string', 'null'], format: 'date-time' }, cancelAtPeriodEnd: { type: 'boolean' } }), { type: 'null' }] } })), ...errors(401) } },
+        get: { tags: ['Membership'], summary: 'Get effective membership and latest subscription status', security: secured, responses: { 200: result(objectResult({ plan: { type: 'string', enum: ['free', 'pro'] }, access: { type: 'string', enum: ['subscription', 'complimentary', 'admin', 'free'] }, subscription: { anyOf: [objectResult({ plan: { type: 'string' }, status: { type: 'string' }, currentPeriodStart: { type: ['string', 'null'], format: 'date-time' }, currentPeriodEnd: { type: ['string', 'null'], format: 'date-time' }, cancelAtPeriodEnd: { type: 'boolean' } }), { type: 'null' }] } })), ...errors(401) } },
       },
       '/api/membership/usage': {
         get: { tags: ['Membership'], summary: 'Get monthly generation usage', security: secured, responses: { 200: ok('Usage'), ...errors(401) } },
@@ -220,14 +220,14 @@ export function buildOpenApi(serverUrl?: string): OpenAPIObject {
         post: {
           tags: ['Trips'],
           summary: 'Plan or refresh a trip',
-          description: 'Queues generation and returns the trip with status `queued`. Counts towards the monthly free-plan limit.',
+          description: 'Queues generation and returns the trip with status `queued`. Counts towards the monthly free-plan limit. When the limit is exhausted, returns HTTP 402 with code `FREE_PLAN_LIMIT` and an upgrade message. Admin-role accounts bypass Pro and free-plan quota checks based on the persisted database role.',
           security: secured,
           parameters: [idParam],
           responses: { 201: ok('TripRecord', 'Queued'), ...errors(401, 402, 404) },
         },
       },
       '/api/trips/{id}/adjustments/preview': {
-        post: { tags: ['Trips'], summary: 'Preview a late-arrival lodging adjustment (Pro only)', description: 'Supports one-way drive trips reaching the destination on the final driving day. Requires active Pro membership. The preview may incur Google Maps/provider costs. Apply only after reviewing the returned plan.', security: secured, parameters: [idParam], requestBody: body('TripAdjustmentRequest'), responses: { 201: result(objectResult({ id: { type: 'string', format: 'uuid' }, plan: ref('TripPlan'), summary: { type: 'object', additionalProperties: true } }), 'Adjustment preview created'), ...errors(400, 401, 403, 404, 409) } },
+        post: { tags: ['Trips'], summary: 'Preview a late-arrival lodging adjustment (Pro only)', description: 'Supports one-way drive trips reaching the destination on the final driving day. Requires active Pro membership or an administrator role persisted in the database. The preview may incur Google Maps/provider costs. Apply only after reviewing the returned plan.', security: secured, parameters: [idParam], requestBody: body('TripAdjustmentRequest'), responses: { 201: result(objectResult({ id: { type: 'string', format: 'uuid' }, plan: ref('TripPlan'), summary: { type: 'object', additionalProperties: true } }), 'Adjustment preview created'), ...errors(400, 401, 403, 404, 409) } },
       },
       '/api/trips/{id}/adjustments/{adjustmentId}/apply': {
         post: { tags: ['Trips'], summary: 'Apply a previously previewed itinerary adjustment', description: 'Applies only if the trip still matches the version used for the preview.', security: secured, parameters: [idParam, adjustmentIdParam], responses: { 201: result(objectResult({ applied: { type: 'boolean' }, plan: ref('TripPlan') })), ...errors(401, 404, 409) } },
