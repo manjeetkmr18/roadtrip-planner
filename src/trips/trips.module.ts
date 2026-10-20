@@ -2,29 +2,36 @@ import { DynamicModule, Injectable, Logger, Module } from '@nestjs/common';
 import { BullModule, InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { ModuleRef } from '@nestjs/core';
 import type { Job, Queue } from 'bullmq';
+import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { waitUntil } from '@vercel/functions';
 import { AuthModule } from '../auth/auth.js';
+import { MembershipModule } from '../membership/membership.module.js';
 import { ShareController, TripsController } from './trips.controller.js';
 import { GENERATION_QUEUE, GenerationQueue, TripsService } from './trips.service.js';
+import { TripAdjustmentsService } from './trip-adjustments.service.js';
 
 @Injectable()
 class BullGenerationQueue extends GenerationQueue {
   constructor(@InjectQueue(GENERATION_QUEUE) private readonly queue: Queue) {
     super();
   }
-  async enqueue(tripId: string) {
-    await this.queue.add('generate', { tripId }, { jobId: `${tripId}-${Date.now()}`, attempts: 2, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: 500, removeOnFail: 500 });
+  async enqueue(tripId: string, generationId: string) {
+    await this.queue.add(
+      'generate',
+      { tripId, generationId },
+      { jobId: `${generationId}-${randomUUID()}`, attempts: 2, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: 500, removeOnFail: 500 },
+    );
   }
 }
 
-@Processor(GENERATION_QUEUE, { concurrency: 3 })
+@Processor(GENERATION_QUEUE, { concurrency: 3, lockDuration: 90_000 })
 class GenerationWorker extends WorkerHost {
   constructor(private readonly trips: TripsService) {
     super();
   }
-  async process(job: Job<{ tripId: string }>) {
-    await this.trips.runGeneration(job.data.tripId);
+  async process(job: Job<{ tripId: string; generationId: string }>) {
+    await this.trips.runGeneration(job.data.tripId, job.data.generationId);
   }
 }
 
@@ -38,9 +45,9 @@ class InlineGenerationQueue extends GenerationQueue {
   constructor(private readonly moduleRef: ModuleRef) {
     super();
   }
-  async enqueue(tripId: string) {
+  async enqueue(tripId: string, generationId: string) {
     const trips = this.moduleRef.get(TripsService, { strict: false });
-    const run = () => trips.runGeneration(tripId).catch((e) => this.log.error(e));
+    const run = () => trips.runGeneration(tripId, generationId).catch((e) => this.log.error(e));
     if (process.env.VERCEL) {
       waitUntil(run());
     } else {
@@ -60,10 +67,11 @@ export class TripsModule {
         ];
     return {
       module: TripsModule,
-      imports: [AuthModule, ...queueImports],
+      imports: [AuthModule, MembershipModule, ...queueImports],
       controllers: [TripsController, ShareController],
       providers: [
         TripsService,
+        TripAdjustmentsService,
         opts.inline ? { provide: GenerationQueue, useClass: InlineGenerationQueue } : { provide: GenerationQueue, useClass: BullGenerationQueue },
         ...(opts.inline ? [] : [GenerationWorker]),
       ],

@@ -10,9 +10,8 @@ export interface Email {
 }
 
 /**
- * Sends account emails through Amazon SES (EMAIL_FROM + AWS credentials). Without EMAIL_FROM,
- * local development prints the email to the console instead; on Vercel that's an error, so a
- * code never ends up in production logs.
+ * Sends account emails through Amazon SES (EMAIL_FROM + AWS credentials). Local development
+ * prints the email to the console; production never falls back to logging verification codes.
  */
 @Injectable()
 export class Mailer {
@@ -32,7 +31,9 @@ export class Mailer {
 
   async send(mail: Email): Promise<void> {
     if (!this.ses) {
-      if (this.env.VERCEL) throw new ServiceUnavailableException('Email is not set up yet (EMAIL_FROM). Please try again later.');
+      if (this.env.VERCEL || this.env.NODE_ENV === 'production') {
+        throw new ServiceUnavailableException('Email is not set up yet (EMAIL_FROM). Please try again later.');
+      }
       this.last = mail;
       this.log.log(`[email not configured: printing instead]\nTo: ${mail.to}\nSubject: ${mail.subject}\n\n${mail.text}`);
       return;

@@ -17,6 +17,8 @@ import {
   isOpenAt,
   decodePolyline,
   encodePolyline,
+  FlightSegment,
+  TravelOptionsQuery,
   pointAlong,
   TripRequest,
   type RouteStep,
@@ -199,6 +201,42 @@ describe('TripRequest schema', () => {
     expect(TripRequest.parse({ ...r, vehicle: { ...r.vehicle, has407Transponder: true, tollPasses: ['US_NY_EZPASSNY'] } }).vehicle.fuelType).toBe('gasoline');
     expect(r.preferences.maxDrivingHoursPerDay).toBe(6);
     expect(() => TripRequest.parse({ ...r, endDate: '2026-10-01' })).toThrow();
+  });
+
+  it('rejects impossible dates, trips over 14 days, and out-of-range coordinates', () => {
+    const r = TripRequest.parse({ origin: { address: 'Mississauga, ON' }, destination: { address: 'Calgary, AB' }, startDate: '2026-11-01', endDate: '2026-11-06' });
+    expect(() => TripRequest.parse({ ...r, startDate: '2026-02-29' })).toThrow();
+    expect(() => TripRequest.parse({ ...r, startDate: '2026-01-01', endDate: '2026-01-14' })).not.toThrow();
+    expect(() => TripRequest.parse({ ...r, startDate: '2026-01-01', endDate: '2026-01-15' })).toThrow();
+    expect(() => TripRequest.parse({ ...r, origin: { address: 'Mississauga, ON', location: { lat: 91, lng: -79 } } })).toThrow();
+  });
+
+  it('rejects impossible local calendar dates in flight segments', () => {
+    expect(() =>
+      FlightSegment.parse({
+        carrier: 'Airline',
+        flightNumber: 'AB123',
+        from: 'YYZ',
+        to: 'YUL',
+        departLocal: '2026-02-30T09:00',
+        arriveLocal: '2026-03-01T10:00',
+      }),
+    ).toThrow();
+  });
+});
+
+describe('TravelOptionsQuery schema', () => {
+  const request = {
+    origin: { address: 'Toronto, ON' },
+    destination: { address: 'Montreal, QC' },
+    startDate: '2026-08-01',
+    endDate: '2026-08-03',
+  };
+
+  it('applies bounded defaults and rejects excessive travel windows or traveller counts', () => {
+    expect(TravelOptionsQuery.parse(request).travellers).toBe(1);
+    expect(() => TravelOptionsQuery.parse({ ...request, endDate: '2026-08-15' })).toThrow();
+    expect(() => TravelOptionsQuery.parse({ ...request, travellers: 10 })).toThrow();
   });
 });
 

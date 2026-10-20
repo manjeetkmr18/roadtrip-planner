@@ -15,6 +15,27 @@
       "when": 1792290000000,
       "tag": "0001_email_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792446090312,
+      "tag": "0002_generation_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792452142510,
+      "tag": "0003_membership",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792456771490,
+      "tag": "0004_trip_adjustments",
+      "breakpoints": true
     }
   ]
 }

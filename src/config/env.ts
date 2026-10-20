@@ -1,4 +1,14 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
+
+function validProxyRange(value: string) {
+  const [address, prefix, ...extra] = value.split('/');
+  const version = isIP(address);
+  if (!version || extra.length > 0) return false;
+  if (prefix === undefined) return true;
+  const maxPrefix = version === 4 ? 32 : 128;
+  return /^\d+$/.test(prefix) && Number(prefix) <= maxPrefix;
+}
 
 const bool = z
   .enum(['true', 'false', '1', '0', ''])
@@ -8,12 +18,19 @@ const optional = z
   .string()
   .optional()
   .transform((v) => (v && v.trim() ? v.trim() : undefined));
+const proxyCidrs = z
+  .string()
+  .optional()
+  .transform((v) => (v?.trim() ? v.split(',').map((item) => item.trim()).filter(Boolean) : undefined))
+  .pipe(z.array(z.string().refine(validProxyRange, 'Use a valid IP address or CIDR')).optional());
 
 export const EnvSchema = z.object({
   NODE_ENV: z.string().default('development'),
   PORT: z.coerce.number().default(4000),
   /** Browser origins allowed by CORS (comma-separated). 8081 is the Expo web dev server. Native apps don't need CORS. */
   WEB_ORIGIN: z.string().default('http://localhost:8081,http://localhost:3000'),
+  /** Explicit trusted proxy IPs/CIDRs. Leave unset unless requests arrive through known, controlled proxies. */
+  TRUSTED_PROXY_CIDRS: proxyCidrs,
 
   DATABASE_URL: z.string().default('postgres://rtp:rtp@localhost:5432/roadtrip'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
@@ -46,6 +63,12 @@ export const EnvSchema = z.object({
   /** Google Places searches per trip day (1 = interests take turns across days). */
   PLACES_SEARCHES_PER_DAY: z.coerce.number().int().min(1).max(4).default(1),
   FREE_TRIPS_PER_MONTH: z.coerce.number().int().min(0).default(3),
+  /** Stripe web subscription billing. Leave all values unset to disable checkout. */
+  STRIPE_SECRET_KEY: optional,
+  STRIPE_WEBHOOK_SECRET: optional,
+  STRIPE_PRICE_ID_MONTHLY: optional,
+  STRIPE_PRICE_ID_ANNUAL: optional,
+  WEB_APP_URL: optional.pipe(z.url().optional()),
 
   /** Postgres pool size. Serverless functions should keep this small (use Neon's pooled URL). */
   DB_POOL_MAX: z.coerce.number().int().min(1).max(50).optional(),
@@ -72,7 +95,21 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   }
   const env = parsed.data;
   const onVercel = !!env.VERCEL;
-  if ((env.NODE_ENV === 'production' || onVercel) && env.JWT_SECRET.startsWith('dev-only')) {
+  const production = env.NODE_ENV === 'production';
+  const stripeSettings = [env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET, env.STRIPE_PRICE_ID_MONTHLY, env.STRIPE_PRICE_ID_ANNUAL, env.WEB_APP_URL];
+  if (stripeSettings.some(Boolean) && !stripeSettings.every(Boolean)) {
+    throw new Error('Set STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, both Stripe price IDs, and WEB_APP_URL together');
+  }
+  if (production && env.WEB_APP_URL && !env.WEB_APP_URL.startsWith('https://')) {
+    throw new Error('Set WEB_APP_URL to an HTTPS URL in production');
+  }
+  if (production && !env.EMAIL_FROM) {
+    throw new Error('Set EMAIL_FROM in production so account verification and password resets can be delivered');
+  }
+  if (production && !(env.SES_REGION || env.AWS_REGION)) {
+    throw new Error('Set SES_REGION or AWS_REGION in production so account emails can be delivered');
+  }
+  if ((production || onVercel) && env.JWT_SECRET.startsWith('dev-only')) {
     throw new Error('Set JWT_SECRET (at least 16 random characters) in production');
   }
   if (onVercel && /localhost|127\.0\.0\.1/.test(env.DATABASE_URL)) {

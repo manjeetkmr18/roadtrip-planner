@@ -14,27 +14,39 @@ Prioritize before scaling or accepting payments:
 
 Priority levels: **P0** critical security/data integrity; **P1** resolve before public launch or paid subscriptions; **P2** maintainability/operations; **P3** later optimization.
 
+### 1.1 Project-specific near-term priorities
+
+This roadmap is grounded in the current Travlio road-trip planner product scope and should be treated as the starting point for the next implementation waves:
+
+- Add camping locations, campgrounds and overnight stop options with clear pricing and availability assumptions.
+- Add hotel and resort options with nightly-rate and total-trip budget calculations, including taxes/fees where relevant.
+- Show imagery for recommended places with required Google Maps and photo-author attribution; the API now exposes an on-demand metadata URL, while app UI rendering remains to be implemented.
+- Keep cost estimates explicit and non-zero when fees are unknown; do not silently undercount accommodation or parking.
+- Separate accommodation search from route planning so that route generation can rank, filter and budget each stay type consistently.
+- Treat accommodation and trip-cost features as first-class stop categories in the planner, not as ad hoc search results.
+
 ## 2. Current issues and risks
 
 ### 2.1 Input validation and planning
 
 | ID | Priority | Issue / risk | Recommended fix |
 |---|---|---|---|
-| INPUT-01 | P1 | Trip duration and stop count need strict upper bounds; oversized requests can increase latency and provider/AI costs. | Validate DTOs at the API boundary and enforce limits in the generation service too. |
-| INPUT-02 | P1 | Invalid dates, end-before-start and timezone ambiguity can produce inconsistent itineraries. | Validate ISO dates, real calendar dates, ordering, timezone semantics, leap years and DST boundaries. |
+| INPUT-01 | P1 | Trip duration and stop count need strict upper bounds; oversized requests can increase latency and provider/AI costs. | DTOs validate a 14-calendar-day cap, waypoint count, coordinate ranges and bounded generation options; generation reparses saved requests before planning. |
+| INPUT-02 | P1 | Invalid dates, end-before-start and timezone ambiguity can produce inconsistent itineraries. | Validate ISO/calendar dates and ordering. Resolve route departure times in the origin/destination timezone; reject nonexistent spring-forward times and choose the earlier instant for repeated fall-back times. |
 | PLAN-01 | P1 | Route alternatives and return-route behavior can diverge if the selected route is not preserved through planning. | Model outbound/return legs explicitly and derive stop candidates from the selected route geometry. Test one-way and round-trip flows. |
 | PLAN-02 | P1 | Reliable toll-aware cost estimation is not established in the current implementation. | Do not advertise toll-inclusive totals until route requests, returned toll data, vehicle assumptions, fallback behavior and tests are implemented. |
 | PLAN-03 | P2 | Large candidate sets and long trips can increase latency and cost. | Bound trip length and candidates per leg/day; add provider timeouts and staged retrieval where needed. |
 | PLAN-04 | P2 | Candidate retrieval, AI selection, narrative generation and persistence are coupled. | Separate orchestration from provider adapters and persistence. Validate AI output and allow only known candidate IDs. |
+| PLAN-05 | P1 | Accommodation options (campgrounds, hotels, resorts) need explicit stop typing and budget treatment to avoid mixing them with activity suggestions. | Add typed accommodation categories with normalized pricing, occupancy assumptions and overnight budget totals. |
 
 ### 2.2 Authentication, authorization and abuse prevention
 
 | ID | Priority | Issue / risk | Recommended fix |
 |---|---|---|---|
-| AUTH-01 | P0/P1 | Email verification may be bypassed or unavailable if mail delivery is misconfigured. **Verify** production behavior. | Fail production startup if required email delivery is missing. Make development bypass explicit and production-safe. |
-| AUTH-02 | P1 | Email-code issuance and attempt counters may race under concurrent requests. **Verify** atomicity. | Store code hashes/expiry; atomically enforce attempts, resend cooldown and one-time use. |
-| AUTH-03 | P1 | Resource-ID endpoints such as feedback may not consistently verify trip ownership. **Verify** all endpoints. | Enforce ownership/visibility in service methods before attaching feedback or modifying resources. |
-| AUTH-04 | P1 | Blind trust of X-Forwarded-For permits IP spoofing and undermines throttling. | Trust only known proxy hops/addresses; do not trust arbitrary forwarded headers. |
+| AUTH-01 | P0/P1 | Email verification may be bypassed or unavailable if mail delivery is misconfigured. **Verify** SES credentials and sending permissions in deployment. | Production startup requires `EMAIL_FROM` and an SES region; console logging of verification codes remains development-only. |
+| AUTH-02 | P1 | Email-code issuance and attempt counters may race under concurrent requests. | Store code hashes/expiry; serialize issuance and resend cooldown per account/purpose, atomically increment attempts, and condition one-time consumption on the remaining attempt count. Unit tests cover concurrent attempts and consumption; confirm behavior against PostgreSQL before deployment. |
+| AUTH-03 | P1 | Resource-ID endpoints such as feedback may not consistently verify trip ownership. | Trip reads, updates, deletes, generation and share-token writes are owner-scoped; feedback verifies ownership before insertion; saved-stop lookup filters by owner. Shared-trip reads remain public only by unguessable share token. |
+| AUTH-04 | P1 | Blind trust of X-Forwarded-For permits IP spoofing and undermines throttling. | Configure Express trust only for explicit proxy IPs/CIDRs using `TRUSTED_PROXY_CIDRS`; otherwise use the socket address and never consume arbitrary forwarded headers. The config hook is implemented; deployment values still need verification. |
 | AUTH-05 | P1 | In-memory rate limits do not enforce global limits across multiple instances. **Verify** current storage. | Use Redis-backed limits plus account/IP throttles for login, verification, generation and expensive lookups. |
 | AUTH-06 | P1 | Duplicate registration can race if uniqueness is checked only in application code. | Add database uniqueness constraints and handle conflicts safely. |
 | AUTH-07 | P1 | JWT, CORS, secrets and health endpoints need production-safe defaults. | Validate configuration at startup, require strong secrets, restrict CORS and expose minimal public health details. |
@@ -47,7 +59,7 @@ Priority levels: **P0** critical security/data integrity; **P1** resolve before 
 | JOB-01 | P1 | Concurrent generation requests may race on quota checks or state transitions. | Reserve quota atomically before enqueueing, with durable usage records and idempotency keys. |
 | JOB-02 | P1 | Queue enqueue failure can leave a generation marked queued without a worker job. | Use safe transitions or a transactional outbox; mark failure and reconcile/release reservations if enqueue fails. |
 | JOB-03 | P1 | Jobs can remain stuck after worker crashes or deployments. | Record queue/start/heartbeat timestamps, attempts and last error; recover stale jobs. |
-| JOB-04 | P1 | Retries can duplicate outputs or quota usage. | Use stable generation IDs, deduplicate side effects and apply bounded backoff only to transient failures. |
+| JOB-04 | P1 | Retries can duplicate outputs or quota usage. | Stable database generation IDs, per-attempt fencing and conditional terminal transitions prevent stale workers from committing duplicate output or quota usage. Define and test a bounded retry policy for transient provider errors before enabling provider-level retries; current planner failures are terminal and require a user retry. |
 | JOB-05 | P1 | Provider timeout, rate-limit and partial-failure behavior needs a defined contract. | Add timeouts, normalized errors, bounded retries and safe persisted error codes. |
 | JOB-06 | P2 | Queue backlog and generation failures need visibility. | Track queue depth/age, duration, retries and failure rate; alert on stuck jobs. |
 
@@ -55,7 +67,7 @@ Priority levels: **P0** critical security/data integrity; **P1** resolve before 
 
 | ID | Priority | Issue / risk | Recommended fix |
 |---|---|---|---|
-| COST-01 | P1 | Metering covers selected Google operations but may omit billable Autocomplete and Place Details usage. | Record every billable operation and reconcile estimates against Google Cloud billing exports. |
+| COST-01 | P1 | Metering covers selected Google operations but may omit billable Autocomplete, Place Details and on-demand Place Photo usage. | Record every billable operation, including image metadata/media requests, and reconcile estimates against Google Cloud billing exports. |
 | COST-02 | P1 | Places Text Search requests ratings, review counts and opening hours, potentially triggering a higher SKU. | Request only fields the product uses; separate essential lookup from optional enrichment. |
 | COST-03 | P1 | AI estimates depend on whether the fast Bedrock model is configured and on actual model pricing. | Record model ID, input/output tokens, latency and estimated cost per generation. Verify current prices and fallback behavior. |
 | COST-04 | P1 | Free-tier assumptions are not hard cost controls. | Label figures as estimates, reconcile against billing and configure spend alerts independent of free tiers. |
@@ -99,12 +111,13 @@ Priority levels: **P0** critical security/data integrity; **P1** resolve before 
 ## 3. Implementation phases
 
 ### Phase 0 — Secure and stabilize
-- [ ] Validate dates, duration, coordinates and generation options.
-- [ ] Verify/fix ownership checks across trips, feedback, saved stops and sharing.
-- [ ] Make email verification and production configuration fail safely.
+- [x] Validate dates, duration, coordinates and generation options at API and service boundaries.
+- [x] Verify/fix ownership checks across trips, feedback, saved stops and sharing; mutation queries are owner-scoped and unknown/non-owned trips return not found.
+- [x] Make email verification and production configuration fail safely; SES configuration is required in production and verification never falls back to logs.
 - [ ] Configure trusted proxies and Redis-backed rate limits.
-- [ ] Make quota reservation and generation transitions atomic.
-- [ ] Handle queue failures and recover stale jobs.
+- [x] Make quota reservation and generation transitions atomic.
+- [x] Release reservations and fail the trip when queue admission fails.
+- [x] Scan and requeue stale jobs on persistent API hosts; serverless deployments recover them when generation is requested again.
 - [ ] Add regression tests.
 
 ### Phase 1 — Refactor without changing behavior
@@ -116,12 +129,12 @@ Priority levels: **P0** critical security/data integrity; **P1** resolve before 
 - [ ] Document migrations, backups and recovery.
 
 ### Phase 2 — Membership foundation
-- [ ] Choose billing provider and purchase surfaces.
+- [x] Choose billing provider and purchase surfaces: web checkout with Stripe for the initial integration; mobile store billing remains out of scope.
 - [ ] Define plan catalog and entitlements.
-- [ ] Add subscription, webhook-event and usage migrations.
+- [x] Add subscription and webhook-event migrations; usage entitlement limits are still pending product definition.
 - [ ] Implement server-side entitlement and atomic quota services.
-- [ ] Implement signed/idempotent webhooks and reconciliation.
-- [ ] Add membership status and usage APIs.
+- [x] Implement signed, deduplicated Stripe webhook handling for subscription state. Reconciliation and additional lifecycle tests remain.
+- [x] Add membership status and usage APIs; per-plan usage entitlements remain pending.
 - [ ] Test renewal, cancellation, failed payment, refunds, duplicate events and quota races.
 - [ ] Build pricing, upgrade, manage-subscription and usage UI.
 
@@ -208,14 +221,18 @@ src/
 │   ├── llm.ts
 │   └── ...                       # Keep existing provider adapters together
 │
-├── integrations.ts               # Temporary home; split by responsibility below
-├── feedback/                     # Extract from misc.ts
+├── feedback/
 │   ├── feedback.controller.ts
 │   └── feedback.module.ts
-├── places/                       # Extract place autocomplete/details from misc.ts
+│
+├── places/
 │   ├── places.controller.ts
 │   └── places.module.ts
-├── health/                       # Add a small health module if health routes need it
+│
+├── health/
+│   ├── health.controller.ts
+│   ├── health.module.ts
+│   └── integrations.controller.ts
 │
 ├── membership/                   # Add when membership work starts
 │   ├── membership.module.ts
@@ -252,7 +269,7 @@ src/
 1. **Keep Drizzle as the persistence approach.** The current schema is in `src/db/schema.ts`; use Drizzle queries and typed database helpers. Do not add TypeORM entities or a repository class for every table by default.
 2. **Keep `core/` framework-independent.** Continue placing pure routing, feasibility, cost, itinerary and time calculations there. It should not import NestJS, Drizzle, Redis, Google SDKs or Bedrock clients.
 3. **Keep `planning/` separate from `trips/`.** Planning builds a plan; trips owns the saved trip and its lifecycle. The generation workflow coordinates the two.
-4. **Split `misc.ts` by responsibility, not by arbitrary class count.** Move feedback endpoints into `feedback/` and place search/details endpoints into `places/`; register the new modules in `app.module.ts`. Preserve existing routes and response shapes during the move. Keep integrations in their own module only where they are a distinct feature.
+4. **Split the former `misc.ts` by responsibility, not by arbitrary class count.** Feedback now lives in `feedback/`, place search/details in `places/`, and health plus integration checks in `health/`; all modules are registered in `app.module.ts`. Preserve their existing routes and response shapes. Keep integrations in their own module only where they are a distinct feature.
 5. **Avoid a premature `users/` module.** Extract it when profile/account operations justify the boundary; authentication can continue owning login and verification meanwhile.
 6. **Keep queue code beside generation.** Reuse the existing BullMQ/Redis configuration. Do not create a generic queue abstraction until a second real use case needs it.
 7. **Add membership only when implementing it.** First settle the billing provider and web/native purchase surfaces. Keep subscription state and quota enforcement server-side, and make quota reservation atomic with generation admission.
@@ -274,12 +291,12 @@ This is a dependency guide, not a requirement for every feature to have every la
 
 ### 4.6 Safe migration order
 
-- [ ] **Step 1:** Add or improve tests around the existing `misc.ts` routes and module registration.
-- [ ] **Step 2:** Extract `FeedbackModule` without changing endpoint contracts.
-- [ ] **Step 3:** Extract `PlacesModule` and its validation/provider calls.
+- [x] **Step 1:** Add or improve tests around the existing miscellaneous routes and module registration.
+- [x] **Step 2:** Extract `FeedbackModule` without changing endpoint contracts.
+- [x] **Step 3:** Extract `PlacesModule` and its validation/provider calls.
 - [ ] **Step 4:** Move generation-specific queue lifecycle and recovery out of generic trip CRUD only where the current code has clear boundaries; preserve existing BullMQ behavior.
 - [ ] **Step 5:** Keep `core/` pure and add import-boundary checks if practical.
-- [ ] **Step 6:** Introduce membership schema/services in a separate migration and feature change after billing decisions are made.
+- [x] **Step 6:** Introduce the initial membership schema/services in a separate migration after selecting Stripe web checkout; finish entitlements, reconciliation and lifecycle policy before launch.
 - [ ] **Step 7:** Revisit `users/`, `health/` and `analytics/` only when their responsibilities justify separate modules.
 
 Each step should build, type-check and pass tests before the next one begins. Do not combine this refactor with a billing-provider migration or a wholesale database rewrite.
@@ -394,7 +411,7 @@ A successful checkout redirect is not proof of payment. Verified events or autho
 
 ## 9. Billing provider decision
 
-Confirm purchase surfaces before coding. Web checkout may suit a provider such as Stripe, subject to eligibility/tax needs. Native iOS/Android digital subscriptions may be subject to Apple/Google in-app purchase rules; check current store policies and Travlio's Expo distribution model. For cross-platform, keep provider adapters separate and reconcile web billing and store notifications into one internal subscription model. Do not choose a provider before the purchase surfaces are confirmed.
+The initial purchase surface is web checkout using Stripe. Matching monthly and annual recurring prices are configured with Stripe price IDs, while amounts and currency come from Stripe's price API. Before launch, confirm merchant eligibility, taxes, receipts and applicable consumer-protection requirements. Native iOS/Android digital subscriptions remain out of scope; confirm current store policies and the Expo distribution model before adding native billing or cross-platform reconciliation.
 
 ## 10. Testing checklist
 

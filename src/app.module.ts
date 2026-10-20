@@ -5,7 +5,11 @@ import { DbModule } from './db/db.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
 import { AuthModule } from './auth/auth.js';
 import { TripsModule } from './trips/trips.module.js';
-import { MiscModule } from './misc.js';
+import { FeedbackModule } from './feedback/feedback.module.js';
+import { HealthModule } from './health/health.module.js';
+import { PlacesModule } from './places/places.module.js';
+import { UsersModule } from './users/users.module.js';
+import { MembershipModule } from './membership/membership.module.js';
 import { RateLimitGuard } from './common/rate-limit.js';
 
 @Global()
@@ -27,7 +31,11 @@ export class AppModule {
         ProvidersModule,
         AuthModule,
         TripsModule.register({ inline: env.QUEUE_INLINE, redisUrl: env.REDIS_URL }),
-        MiscModule,
+        FeedbackModule,
+        HealthModule,
+        PlacesModule,
+        UsersModule,
+        MembershipModule,
       ],
       providers: [{ provide: APP_GUARD, useClass: RateLimitGuard }],
     };

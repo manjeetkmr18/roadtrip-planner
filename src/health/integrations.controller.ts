@@ -2,14 +2,14 @@ import { Controller, Get, HttpCode, Inject, NotFoundException, Post, Req, Res, U
 import type { Request, Response } from 'express';
 import { sql } from 'drizzle-orm';
 import { Redis } from 'ioredis';
-import { addDays, encodePolyline } from './core/index.js';
-import { DB, type Db } from './db/db.module.js';
-import { ENV, type Env } from './config/env.js';
-import { basicAuthOk } from './docs.js';
-import { AuthService } from './auth/auth.js';
-import { airportByIata } from './providers/airports.js';
-import { fetchJson, ProviderContext } from './providers/infra.js';
-import { Providers } from './providers/providers.module.js';
+import { addDays, encodePolyline } from '../core/index.js';
+import { DB, type Db } from '../db/db.module.js';
+import { ENV, type Env } from '../config/env.js';
+import { basicAuthOk } from '../docs.js';
+import { AuthService } from '../auth/auth.js';
+import { airportByIata } from '../providers/airports.js';
+import { fetchJson, ProviderContext } from '../providers/infra.js';
+import { Providers } from '../providers/providers.module.js';
 
 export type CheckStatus = 'ok' | 'fail' | 'off';
 export interface CheckResult {

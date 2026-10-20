@@ -10,8 +10,8 @@ describe('RateLimiter', () => {
     expect(r.hit('a', 60_000)).toBe(0);
   });
 
-  it('uses the first forwarded address', () => {
-    expect(clientIp({ headers: { 'x-forwarded-for': '1.2.3.4, 10.0.0.1' } })).toBe('1.2.3.4');
+  it('ignores untrusted forwarded addresses', () => {
+    expect(clientIp({ headers: { 'x-forwarded-for': '1.2.3.4, 10.0.0.1' }, ip: '5.6.7.8' })).toBe('5.6.7.8');
     expect(clientIp({ headers: {}, ip: '5.6.7.8' })).toBe('5.6.7.8');
   });
 });
