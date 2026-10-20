@@ -27,8 +27,81 @@ describe('API docs', () => {
   it('describes every endpoint, with schemas from the real validators', () => {
     const doc = buildOpenApi() as unknown as { paths: Record<string, object>; components: { schemas: Record<string, { properties?: Record<string, unknown> }> } };
     expect(Object.keys(doc.paths)).toEqual(
-      expect.arrayContaining(['/api/auth/login', '/api/trips', '/api/trips/{id}', '/api/trips/{id}/generate', '/api/share/{token}', '/api/feedback', '/api/health']),
+      expect.arrayContaining([
+        '/api/auth/register',
+        '/api/auth/login',
+        '/api/auth/me',
+        '/api/auth/verify-email',
+        '/api/auth/resend-verification',
+        '/api/auth/forgot-password',
+        '/api/auth/reset-password',
+        '/api/users/me',
+        '/api/membership/plans',
+        '/api/membership/me',
+        '/api/membership/usage',
+        '/api/membership/checkout',
+        '/api/membership/portal',
+        '/api/membership/webhook',
+        '/api/trips/travel-options',
+        '/api/trips',
+        '/api/trips/usage',
+        '/api/trips/saved-stops/nearby',
+        '/api/trips/{id}',
+        '/api/trips/{id}/generate',
+        '/api/trips/{id}/adjustments/preview',
+        '/api/trips/{id}/adjustments/{adjustmentId}/apply',
+        '/api/trips/{id}/adjustments/{adjustmentId}/undo',
+        '/api/trips/{id}/share',
+        '/api/share/{token}',
+        '/api/places/autocomplete',
+        '/api/places/details',
+        '/api/places/photo',
+        '/api/feedback',
+        '/api/health',
+        '/api/health/integrations',
+        '/api/health/test-account',
+      ]),
     );
+    const expectedMethods: Record<string, string[]> = {
+      '/api/auth/register': ['post'],
+      '/api/auth/login': ['post'],
+      '/api/auth/me': ['get'],
+      '/api/auth/verify-email': ['post'],
+      '/api/auth/resend-verification': ['post'],
+      '/api/auth/forgot-password': ['post'],
+      '/api/auth/reset-password': ['post'],
+      '/api/users/me': ['get', 'patch'],
+      '/api/membership/plans': ['get'],
+      '/api/membership/me': ['get'],
+      '/api/membership/usage': ['get'],
+      '/api/membership/checkout': ['post'],
+      '/api/membership/portal': ['post'],
+      '/api/membership/webhook': ['post'],
+      '/api/trips/travel-options': ['post'],
+      '/api/trips': ['get', 'post'],
+      '/api/trips/usage': ['get'],
+      '/api/trips/saved-stops/nearby': ['get'],
+      '/api/trips/{id}': ['get', 'put', 'delete'],
+      '/api/trips/{id}/generate': ['post'],
+      '/api/trips/{id}/adjustments/preview': ['post'],
+      '/api/trips/{id}/adjustments/{adjustmentId}/apply': ['post'],
+      '/api/trips/{id}/adjustments/{adjustmentId}/undo': ['post'],
+      '/api/trips/{id}/share': ['post'],
+      '/api/share/{token}': ['get'],
+      '/api/places/autocomplete': ['get'],
+      '/api/places/details': ['get'],
+      '/api/places/photo': ['get'],
+      '/api/feedback': ['post'],
+      '/api/health': ['get'],
+      '/api/health/integrations': ['get'],
+      '/api/health/test-account': ['post'],
+    };
+    for (const [path, methods] of Object.entries(expectedMethods)) {
+      expect(Object.keys(doc.paths[path] as object)).toEqual(expect.arrayContaining(methods));
+    }
+    expect(Object.keys(doc.paths['/api/health'] as object)).toContain('get');
+    expect(Object.keys(doc.paths['/api/health/integrations'] as object)).toContain('get');
+    expect(Object.keys(doc.paths['/api/health/test-account'] as object)).toContain('post');
     expect(Object.keys(doc.components.schemas.TripRequest.properties ?? {})).toEqual(expect.arrayContaining(['origin', 'destination', 'startDate', 'preferences']));
     expect(JSON.stringify(doc)).toContain('"bearer"');
   });
