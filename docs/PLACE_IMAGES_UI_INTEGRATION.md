@@ -1,6 +1,6 @@
 # Trip Place Images — Client UI Integration
 
-This document describes the client-side work needed to display images for recommended trip stops. The API is implemented in this repository; the trip-screen UI is in the client application and must be updated separately.
+This document describes the client-side work needed to display images for recommended trip stops. The API is implemented in this repository. The Next.js web app now resolves and displays images and attribution in itinerary stop cards (including its narrow/mobile layout); the native Expo app still needs the equivalent UI integration.
 
 ## API contract
 
@@ -42,15 +42,13 @@ The endpoint accepts either an authenticated request or a rate-limited anonymous
 
 ## UI implementation checklist
 
-- [ ] In the itinerary/trip stop card, check for `photosUrl`; if absent, keep the existing card layout and placeholder.
-- [ ] On card visibility, request `photosUrl` using the configured API base URL and the app's standard HTTP client. Avoid requesting images for every stop at once on long plans; use lazy loading or fetch as cards approach the viewport.
-- [ ] Show the existing placeholder/skeleton while metadata loads. Handle request failure, `photo: null`, invalid response, and image-load error with the same graceful no-image fallback.
-- [ ] Render `photo.url` as the image source. Preserve aspect ratio with a consistent crop/contain policy, and avoid layout shift by reserving the image frame's dimensions.
-- [ ] Display each `attributions[].displayName` alongside the image. When `uri` is present, make the attribution a link and open external URLs safely (`noopener`/`noreferrer` on web).
-- [ ] Include the Google Maps logo/text attribution whenever Google Places content is shown outside a Google Map. Keep both Google's and the photo author's attribution visible and legible against the card/image.
-- [ ] Add accessible image text (for example, the stop name as alt text); mark decorative placeholders appropriately.
-- [ ] Do not save the returned temporary `photo.url` to local storage, a database, trip state persisted across sessions, analytics events, or a general-purpose image cache. Do not save raw Google photo references. Store/use the stop's `photosUrl` and place ID only.
-- [ ] Ensure shared-trip pages use the same attribution and error/placeholder behavior as owned trip pages.
+- [x] Web: In itinerary stop cards, check for `photosUrl`; stops without it retain the existing layout.
+- [x] Web: Resolve photo metadata only as cards approach the viewport, using the configured API base URL and authenticated API client.
+- [x] Web: Reserve a 16:9 skeleton frame while loading; hide it gracefully for null photos, request errors, or image-load failures.
+- [x] Web: Render the temporary URL directly, show author attribution and Google Maps attribution, and provide the stop name as alt text.
+- [x] Web: Do not persist the temporary photo URL; load images directly without Next.js image optimization.
+- [x] Web: Use the same itinerary component for owned and shared trip plans.
+- [ ] Native Expo app: Add equivalent lazy loading, fallbacks, attribution, and accessible image text.
 - [ ] Test cards with a photo, no `photosUrl`, a `null` photo, endpoint error, image error, missing author link, and multiple authors if returned.
 - [ ] Check narrow mobile and wide desktop layouts, dark/light backgrounds, keyboard navigation, and screen-reader labels.
 
