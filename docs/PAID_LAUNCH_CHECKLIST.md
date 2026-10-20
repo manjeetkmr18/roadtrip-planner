@@ -77,7 +77,8 @@ Use Stripe's test cards and test clocks/events where appropriate. Verify API sta
 - [ ] Enforce these entitlements server-side in every applicable API. A client-supplied plan or `isPro` flag must never grant access.
 - [ ] Add atomic, durable quota reservations and idempotent usage records if plan limits differ from the current free-generation counter.
 - [ ] Document the customer-facing renewal, cancellation, refund, trial, tax, and support policies.
-- [ ] Build and test the web pricing, upgrade, success/cancel, usage, and manage-subscription UI. The API repository currently does not provide these screens.
+- [x] Implement the web account/profile, usage, plan selection, Stripe checkout return, and subscription portal screens in the separate `travlio` repository.
+- [ ] Complete an end-to-end Stripe test-mode checkout, webhook activation, cancellation, and billing-portal test after deployment configuration is ready.
 - [ ] Decide whether native iOS/Android subscriptions are in scope. If they are, review current store billing requirements before adding another provider path.
 
 ## 6. Remaining engineering and launch work
