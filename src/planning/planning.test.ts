@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { encodePolyline, TripRequest, type RouteStep, type WeatherObservation } from '../core/index.js';
 import { legCostLines } from './route-costs.js';
 import { TripPlanner, localIso } from './planner.js';
-import { interestQueries, rankCandidates, chooseStops } from './stops.js';
+import { interestQueries, rankCandidates, chooseStops, toStop } from './stops.js';
 import { ProviderContext } from '../providers/infra.js';
 import { GeocodingProvider, PlacesProvider, RoutesProvider, type RawRoute } from '../providers/google.js';
 import { FuelPriceProvider } from '../providers/costs-data.js';
@@ -30,6 +30,23 @@ class FakeAdvisories {
   }
 }
 const noLlm: Llm = { enabled: false, complete: async () => '' };
+
+describe('place photo stops', () => {
+  it('exposes Google photo proxy URLs and preserves required author attribution', () => {
+    const ranked = rankCandidates([{
+      id: 'ChIJphoto1',
+      name: 'Scenic overlook',
+      location: { lat: 43.7, lng: -79.4 },
+      rating: 4.8,
+      ratingCount: 1000,
+      types: ['tourist_attraction'],
+      query: 'scenic viewpoint',
+      sample: false,
+    }], null)[0];
+
+    expect(toStop(ranked, true).photosUrl).toBe('/api/places/photo?placeId=ChIJphoto1');
+  });
+});
 
 function providers(over: Partial<Record<keyof Providers, unknown>> = {}): Providers {
   return {
@@ -210,6 +227,13 @@ describe('localIso', () => {
     expect(localIso('2026-07-01', '08:00', 'America/Toronto')).toBe('2026-07-01T08:00:00-04:00');
     expect(localIso('2026-01-15', '08:00', 'America/Toronto')).toBe('2026-01-15T08:00:00-05:00');
     expect(localIso('2026-01-15', '08:00', 'America/Regina')).toBe('2026-01-15T08:00:00-06:00');
+  });
+
+  it('resolves DST boundaries and rejects nonexistent local times', () => {
+    expect(localIso('2026-03-08', '01:30', 'America/Toronto')).toBe('2026-03-08T01:30:00-05:00');
+    expect(localIso('2026-03-08', '03:30', 'America/Toronto')).toBe('2026-03-08T03:30:00-04:00');
+    expect(() => localIso('2026-03-08', '02:30', 'America/Toronto')).toThrow(/does not exist/);
+    expect(localIso('2026-11-01', '01:30', 'America/Toronto')).toBe('2026-11-01T01:30:00-04:00');
   });
 });
 

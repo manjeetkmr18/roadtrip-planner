@@ -1,16 +1,24 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
-import { TravelOptionsQuery, TripRequest } from '../core/index.js';
+import { TravelOptionsQuery, TripAdjustmentRequest, TripRequest } from '../core/index.js';
 import { CurrentUser, VerifiedGuard, type AuthUser } from '../auth/auth.js';
 import { ZodPipe } from '../common/zod.pipe.js';
 import { TripsService } from './trips.service.js';
+import { TripAdjustmentsService } from './trip-adjustments.service.js';
 
-const Nearby = z.object({ lat: z.coerce.number(), lng: z.coerce.number(), radiusKm: z.coerce.number().default(25) });
+const Nearby = z.object({
+  lat: z.coerce.number().min(-90).max(90),
+  lng: z.coerce.number().min(-180).max(180),
+  radiusKm: z.coerce.number().positive().max(200).default(25),
+});
 
 @Controller('trips')
 @UseGuards(VerifiedGuard)
 export class TripsController {
-  constructor(private readonly trips: TripsService) {}
+  constructor(
+    private readonly trips: TripsService,
+    private readonly adjustments: TripAdjustmentsService,
+  ) {}
 
   @Get()
   list(@CurrentUser() user: AuthUser) {
@@ -57,6 +65,33 @@ export class TripsController {
   @Post(':id/generate')
   generate(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.trips.requestGeneration(user, id);
+  }
+
+  @Post(':id/adjustments/preview')
+  previewAdjustment(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodPipe(TripAdjustmentRequest)) body: TripAdjustmentRequest,
+  ) {
+    return this.adjustments.preview(user, id, body);
+  }
+
+  @Post(':id/adjustments/:adjustmentId/apply')
+  applyAdjustment(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('adjustmentId', ParseUUIDPipe) adjustmentId: string,
+  ) {
+    return this.adjustments.apply(user, id, adjustmentId);
+  }
+
+  @Post(':id/adjustments/:adjustmentId/undo')
+  undoAdjustment(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('adjustmentId', ParseUUIDPipe) adjustmentId: string,
+  ) {
+    return this.adjustments.undo(user, id, adjustmentId);
   }
 
   @Post(':id/share')

@@ -2,6 +2,8 @@ import { boolean, geometry, index, integer, jsonb, pgEnum, pgTable, text, timest
 import type { TripPlan, TripRequest } from '../core/index.js';
 
 export const tripStatus = pgEnum('trip_status', ['draft', 'queued', 'generating', 'ready', 'failed']);
+export const generationJobStatus = pgEnum('generation_job_status', ['queued', 'generating', 'completed', 'failed', 'released']);
+export const membershipStatus = pgEnum('membership_status', ['incomplete', 'trialing', 'active', 'past_due', 'cancel_pending', 'canceled', 'unpaid', 'paused', 'expired']);
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -9,9 +11,41 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   name: text('name'),
   plan: text('plan').notNull().default('free'), // free | pro
+  stripeCustomerId: text('stripe_customer_id').unique(),
   /** Set once the user enters the code emailed at sign-up (or resets their password). */
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const membershipSubscriptions = pgTable(
+  'membership_subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    stripeSubscriptionId: text('stripe_subscription_id').notNull().unique(),
+    stripePriceId: text('stripe_price_id').notNull(),
+    planCode: text('plan_code').notNull(),
+    status: membershipStatus('status').notNull(),
+    currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
+    canceledAt: timestamp('canceled_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [index('membership_subscriptions_user_status_idx').on(t.userId, t.status)],
+);
+
+export const membershipWebhookEvents = pgTable('membership_webhook_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  stripeEventId: text('stripe_event_id').notNull().unique(),
+  eventType: text('event_type').notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 /** One-time 6-digit codes for email verification and password resets (only a hash is stored). */
@@ -56,6 +90,28 @@ export const trips = pgTable(
   (t) => [index('trips_user_idx').on(t.userId)],
 );
 
+export const tripAdjustments = pgTable(
+  'trip_adjustments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tripId: uuid('trip_id')
+      .notNull()
+      .references(() => trips.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('proposed'),
+    baseGeneratedAt: text('base_generated_at').notNull(),
+    previousPlan: jsonb('previous_plan').$type<TripPlan>().notNull(),
+    proposedPlan: jsonb('proposed_plan').$type<TripPlan>().notNull(),
+    apiCostUsd: real('api_cost_usd').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    appliedAt: timestamp('applied_at', { withTimezone: true }),
+    undoneAt: timestamp('undone_at', { withTimezone: true }),
+  },
+  (t) => [index('trip_adjustments_user_trip_created_idx').on(t.userId, t.tripId, t.createdAt)],
+);
+
 /** One row per generation run, for per-user limits and cost tracking. */
 export const generations = pgTable(
   'generations',
@@ -74,6 +130,36 @@ export const generations = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('generations_user_created_idx').on(t.userId, t.createdAt)],
+);
+
+/** Durable admission and lifecycle record for a queued generation. */
+export const generationJobs = pgTable(
+  'generation_jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tripId: uuid('trip_id')
+      .notNull()
+      .references(() => trips.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: generationJobStatus('status').notNull().default('queued'),
+    attempts: integer('attempts').notNull().default(0),
+    queuedAt: timestamp('queued_at', { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('generation_jobs_user_created_idx').on(t.userId, t.createdAt),
+    index('generation_jobs_trip_status_idx').on(t.tripId, t.status),
+  ],
 );
 
 /**

@@ -6,6 +6,7 @@ import {
   samplePoints,
   type LatLng,
   type OpeningPeriod,
+  type PlacePhoto,
   type PlaceInput,
   type RouteStep,
 } from '../core/index.js';
@@ -307,6 +308,36 @@ export function toOpeningPeriods(periods?: NonNullable<NonNullable<PlacesRespons
 
 export class PlacesProvider {
   constructor(private readonly key?: string) {}
+
+  async photo(placeId: string): Promise<PlacePhoto | null> {
+    if (!this.key) throw new Error('Place photos need GOOGLE_MAPS_API_KEY');
+    if (!/^[A-Za-z0-9_-]{10,300}$/.test(placeId)) throw new Error('Invalid Google Place ID');
+
+    const details = await fetchJson<{
+      photos?: { name: string; authorAttributions?: { displayName: string; uri?: string; photoUri?: string }[] }[];
+    }>('Google Place Photo metadata', `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+      headers: { 'X-Goog-Api-Key': this.key, 'X-Goog-FieldMask': 'photos.name,photos.authorAttributions' },
+      timeoutMs: 6_000,
+      retries: 0,
+    });
+    const photo = details.photos?.[0];
+    if (!photo) return null;
+
+    const resource = photo.name.split('/').map(encodeURIComponent).join('/');
+    const query = new URLSearchParams({ maxWidthPx: '800', skipHttpRedirect: 'true', key: this.key });
+    const media = await fetchJson<{ photoUri?: string }>(
+      'Google Place Photo',
+      `https://places.googleapis.com/v1/${resource}/media?${query}`,
+      { timeoutMs: 6_000, retries: 0 },
+    );
+    if (!media.photoUri || !/^https:\/\/lh\d+\.googleusercontent\.com\//.test(media.photoUri)) {
+      throw new Error('Google Place Photo returned an invalid image URL');
+    }
+    return {
+      url: media.photoUri,
+      attributions: photo.authorAttributions ?? [],
+    };
+  }
 
   private static readonly FIELDS = [
     'places.id',

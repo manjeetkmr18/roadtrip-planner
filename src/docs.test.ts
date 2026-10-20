@@ -39,9 +39,10 @@ describe('API docs', () => {
 });
 
 describe('Vercel environment', () => {
+  const emailConfig = { EMAIL_FROM: 'Travlio <no-reply@example.com>', AWS_REGION: 'us-east-1' };
   const base = { VERCEL: '1', JWT_SECRET: 'x'.repeat(32), DATABASE_URL: 'postgres://u:p@ep-x.neon.tech/db?sslmode=require' };
   it('plans in-process and keeps the pool small on Vercel', () => {
-    const env = loadEnv(base);
+    const env = loadEnv({ ...base, ...emailConfig });
     expect(env.QUEUE_INLINE).toBe(true);
     expect(env.DB_POOL_MAX).toBe(3);
   });
@@ -50,7 +51,7 @@ describe('Vercel environment', () => {
     expect(loadEnv({ ...base, QUEUE_INLINE: 'false', REDIS_URL: 'rediss://default:x@eu1.upstash.io:6379' }).QUEUE_INLINE).toBe(false);
   });
   it('fails clearly without a JWT secret or a real database', () => {
-    expect(() => loadEnv({ ...base, JWT_SECRET: undefined })).toThrow(/JWT_SECRET/);
-    expect(() => loadEnv({ ...base, DATABASE_URL: undefined })).toThrow(/DATABASE_URL/);
+    expect(() => loadEnv({ ...base, ...emailConfig, JWT_SECRET: undefined })).toThrow(/JWT_SECRET/);
+    expect(() => loadEnv({ ...base, ...emailConfig, DATABASE_URL: undefined })).toThrow(/DATABASE_URL/);
   });
 });

@@ -81,7 +81,7 @@ describe('suggestion bias', () => {
   });
 
   it('reads the visitor location from Vercel headers', async () => {
-    const { visitorLocation } = await import('../misc.js');
+    const { visitorLocation } = await import('../places/places.controller.js');
     expect(visitorLocation({ 'x-vercel-ip-latitude': '43.65', 'x-vercel-ip-longitude': '-79.38' })).toEqual({ lat: 43.65, lng: -79.38 });
     expect(visitorLocation({})).toBeUndefined();
     expect(visitorLocation({ 'x-vercel-ip-latitude': 'x', 'x-vercel-ip-longitude': '1' })).toBeUndefined();

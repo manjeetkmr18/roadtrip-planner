@@ -45,9 +45,14 @@ src/
                Environment Canada + NWS weather, Ontario 511, travel advisories, fuel prices
   planning/    The trip planner that ties it together (planner.ts), cost lines per route, stop selection
   trips/       Trips API, BullMQ queue + worker, sharing
+               Trip stops expose an on-demand Google Places photo metadata URL
   auth/        Register / login (JWT)
+  users/       Authenticated profile APIs
+  membership/  Stripe checkout, billing portal and subscription state
   db/          Drizzle schema + migration runner (migrations in /drizzle)
-  misc.ts      Feedback + health endpoints
+  feedback/    Feedback endpoint and module
+  places/      Place autocomplete/details endpoint and module
+  health/      Health and integration-check endpoints
   main.ts      App entry
 ```
 
@@ -84,9 +89,11 @@ Travlio does not book flights; each flight links to the same search on Google Fl
 
 | Variable | Used for | Notes |
 |---|---|---|
+| `TRUSTED_PROXY_CIDRS` | Client IP extraction when deployed behind a proxy | Optional comma-separated IPs/CIDRs for controlled proxies only. Unset means forwarded headers are not trusted; configure the actual proxy ranges before relying on IP rate limits. |
 | `GOOGLE_MAPS_API_KEY` | Geocoding, Routes, Places (New), including the place-field suggestions (`GET /api/places/autocomplete`) | Server key: API restrictions only (Vercel has no fixed IPs). Never a website/referrer-restricted key; Google rejects those from servers |
 | `DUFFEL_ACCESS_TOKEN` | Real flights for fly + drive | Optional; searching is free. Without it, flights are sample data |
-| `EMAIL_FROM` (+ `SES_REGION`) | Sign-up verification codes and password resets via Amazon SES, e.g. `Travlio <no-reply@travlio.app>` | Uses the AWS credentials. Until it's set on Vercel, email verification is off. Locally, emails are printed in the API log |
+| `EMAIL_FROM` (+ `SES_REGION` or `AWS_REGION`) | Sign-up verification codes and password resets via Amazon SES, e.g. `Travlio <no-reply@travlio.app>` | Uses the AWS credentials. Required for production startup; locally, emails are printed in the API log |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID_MONTHLY`, `STRIPE_PRICE_ID_ANNUAL`, `WEB_APP_URL` | Stripe web subscriptions | Configure all values together; use Stripe test-mode keys/prices locally. Webhook endpoint: `POST /api/membership/webhook`; subscribe it to `checkout.session.completed` and `customer.subscription.created`, `.updated`, `.deleted`. Production `WEB_APP_URL` must use HTTPS |
 | `AWS_REGION`, `BEDROCK_MODEL_ID` + AWS credentials | Stop choice and day descriptions | Model must be enabled in Bedrock |
 | `ONTARIO_511_API_KEY` | Road closures | Free key from 511on.ca |
 | `OILPRICEAPI_KEY`, `EIA_API_KEY` | Current fuel prices (Canada / US) | Free tiers; otherwise labelled defaults |
@@ -145,12 +152,26 @@ The end-to-end check leaves two `check-…@example.com` accounts and one feedbac
 
 ```
 POST /api/auth/register   POST /api/auth/login   GET /api/auth/me
+GET | PATCH /api/users/me
+GET /api/membership/plans   GET /api/membership/me   GET /api/membership/usage
+POST /api/membership/checkout   POST /api/membership/portal
 GET  /api/trips           POST /api/trips        GET | PUT | DELETE /api/trips/:id
+GET  /api/places/photo?placeId=<place-id>   (short-lived image URL + author attribution)
 POST /api/trips/:id/generate     (plan or refresh)       GET /api/trips/usage
 POST /api/trips/:id/share        GET /api/share/:token   (public, read-only)
 GET  /api/trips/saved-stops/nearby?lat=&lng=&radiusKm=   (PostGIS)
 POST /api/feedback               GET /api/health
 ```
+
+Membership checkout accepts `{"plan":"monthly","idempotencyKey":"<uuid>"}` (`annual` is also supported). Pro access is granted only after a verified Stripe webhook updates server-side subscription state; a checkout redirect alone does not grant access. Configure matching monthly/yearly recurring Stripe prices and webhook events before enabling payments. Pricing/upgrade UI is not part of this API repository.
+
+For the step-by-step Stripe test/live setup and remaining paid-launch work, see [the paid launch checklist](./docs/PAID_LAUNCH_CHECKLIST.md).
+
+Generated stops expose `photosUrl` when Google Places is configured. The client should request that URL when rendering a stop card; it returns a temporary Google-hosted image URL and any photo-author attributions. Display the author attribution and Google Maps attribution with the image. The photo reference and temporary image URL are resolved on demand rather than stored in trip plans.
+
+For the client implementation contract, loading/error behavior, accessibility, attribution, and UI test cases, see [Trip Place Images — Client UI Integration](./docs/PLACE_IMAGES_UI_INTEGRATION.md).
+
+The late-arrival lodging adjustment is available in the web and mobile trip screens. It previews a route to nearby lodging, updates the arrival day and subsequent destination-day start, and supports undo. See [Late-arrival itinerary adjustments](./docs/ITINERARY_ADJUSTMENTS.md) for the API contract, migration, and MVP boundaries.
 
 ### API docs (password protected)
 

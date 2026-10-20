@@ -42,10 +42,50 @@ function timeZoneFor(p: ResolvedPlace): string {
 
 /** ISO timestamp with the correct UTC offset for a local date + time in a time zone. */
 export function localIso(date: string, hhmm: string, timeZone: string): string {
-  const guess = new Date(`${date}T${hhmm}:00Z`);
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' }).formatToParts(guess);
-  const off = parts.find((p) => p.type === 'timeZoneName')?.value.replace('GMT', '') || '+00:00';
-  return `${date}T${hhmm}:00${off === '' ? '+00:00' : off}`;
+  const [year, month, day] = date.split('-').map(Number);
+  const [hour, minute] = hhmm.split(':').map(Number);
+  const target = Date.UTC(year, month - 1, day, hour, minute);
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const localParts = (instant: number) => {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(instant)).map(({ type, value }) => [type, value]));
+    return {
+      year: Number(parts.year),
+      month: Number(parts.month),
+      day: Number(parts.day),
+      hour: Number(parts.hour),
+      minute: Number(parts.minute),
+      second: Number(parts.second),
+    };
+  };
+  const offsets = new Set(
+    [-36, -12, 0, 12, 36].map((hours) => {
+      const instant = target + hours * 60 * 60_000;
+      const local = localParts(instant);
+      return Math.round((Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, local.second) - instant) / 60_000);
+    }),
+  );
+  const candidates = [...offsets]
+    .map((offset) => ({ offset, instant: target - offset * 60_000 }))
+    .filter(({ instant }) => {
+      const local = localParts(instant);
+      return local.year === year && local.month === month && local.day === day && local.hour === hour && local.minute === minute && local.second === 0;
+    })
+    .sort((a, b) => a.instant - b.instant);
+  const selected = candidates[0];
+  if (!selected) throw new RangeError(`Local time ${date} ${hhmm} does not exist in ${timeZone} because of a daylight-saving transition`);
+  const sign = selected.offset >= 0 ? '+' : '-';
+  const absolute = Math.abs(selected.offset);
+  const offset = `${sign}${String(Math.floor(absolute / 60)).padStart(2, '0')}:${String(absolute % 60).padStart(2, '0')}`;
+  return `${date}T${hhmm}:00${offset}`;
 }
 
 function segmentPolyline(seg: DriveSegment): LatLng[] {

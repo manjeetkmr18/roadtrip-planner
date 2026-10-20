@@ -17,7 +17,8 @@ async function bootstrap() {
   const { AppModule } = await import('./app.module.js');
   const { setupDocs } = await import('./docs.js');
   // abortOnError: false makes Nest throw instead of exiting the process, so startupFailed can answer.
-  const app = await NestFactory.create(AppModule.register(env), { abortOnError: false });
+  const app = await NestFactory.create(AppModule.register(env), { abortOnError: false, rawBody: true });
+  app.getHttpAdapter().getInstance().set('trust proxy', env.TRUSTED_PROXY_CIDRS ?? false);
   app.setGlobalPrefix('api');
   app.enableCors({ origin: env.WEB_ORIGIN.split(','), credentials: true });
   app.enableShutdownHooks();

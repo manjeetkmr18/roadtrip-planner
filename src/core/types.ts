@@ -19,13 +19,13 @@ export type SourceRef = z.infer<typeof SourceRef>;
 export const Currency = z.enum(['CAD', 'USD']);
 export type Currency = z.infer<typeof Currency>;
 
-export const LatLng = z.object({ lat: z.number(), lng: z.number() });
+export const LatLng = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) });
 export type LatLng = z.infer<typeof LatLng>;
 
 export const PlaceInput = z.object({
-  address: z.string().min(2),
+  address: z.string().trim().min(2).max(300),
   location: LatLng.optional(),
-  placeId: z.string().optional(),
+  placeId: z.string().max(300).optional(),
 });
 export type PlaceInput = z.infer<typeof PlaceInput>;
 
@@ -48,8 +48,14 @@ export type FuelType = z.infer<typeof FuelType>;
 export const Pace = z.enum(['relaxed', 'balanced', 'packed']);
 export type Pace = z.infer<typeof Pace>;
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+const isoDate = z.iso.date();
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM (24h)');
+const MAX_TRIP_DAYS = 14;
+
+function withinTripDateLimit(startDate: string, endDate: string) {
+  const days = (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000 + 1;
+  return days <= MAX_TRIP_DAYS;
+}
 
 export const VehicleInput = z.object({
   fuelType: FuelType.default('gasoline'),
@@ -65,7 +71,7 @@ export type VehicleInput = z.infer<typeof VehicleInput>;
 export const PreferencesInput = z.object({
   pace: Pace.default('balanced'),
   maxDrivingHoursPerDay: z.number().min(1).max(14).default(6),
-  interests: z.array(z.string()).default(['nature', 'famous attractions']),
+  interests: z.array(z.string().trim().min(1).max(80)).max(20).default(['nature', 'famous attractions']),
   /** Paid parking budget assumption per stop, in trip currency. */
   includeParking: z.boolean().default(true),
   /** Longest detour (there and back) the planner will suggest for a stop. */
@@ -88,7 +94,10 @@ export const Airport = z.object({
 export type Airport = z.infer<typeof Airport>;
 
 /** Local date-time at the airport, no offset: YYYY-MM-DDTHH:MM. */
-const localDateTime = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'Use YYYY-MM-DDTHH:MM');
+const localDateTime = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'Use YYYY-MM-DDTHH:MM')
+  .refine((value) => z.iso.date().safeParse(value.slice(0, 10)).success, 'Use a valid local calendar date');
 
 export const FlightSegment = z.object({
   carrier: z.string(),
@@ -164,9 +173,18 @@ export const TripRequest = z
     travel: TravelInput.default({ mode: 'drive', travellers: 1, rentalCar: true }),
   })
   .refine((t) => t.travel.mode === 'drive' || !!t.travel.outbound, { message: 'Pick an outbound flight for fly + drive', path: ['travel', 'outbound'] })
-  .refine((t) => t.endDate >= t.startDate, { message: 'endDate must be on or after startDate', path: ['endDate'] });
+  .refine((t) => t.endDate >= t.startDate, { message: 'endDate must be on or after startDate', path: ['endDate'] })
+  .refine((t) => withinTripDateLimit(t.startDate, t.endDate), { message: `Trip cannot exceed ${MAX_TRIP_DAYS} days`, path: ['endDate'] });
 export type TripRequest = z.infer<typeof TripRequest>;
 export type TripRequestInput = z.input<typeof TripRequest>;
+
+export const TripAdjustmentRequest = z.object({
+  arrivalDay: z.number().int().positive(),
+  arrivalTime: hhmm,
+  resumeTime: hhmm.default('10:00'),
+  accommodation: PlaceInput,
+});
+export type TripAdjustmentRequest = z.infer<typeof TripAdjustmentRequest>;
 
 // ---------- Plan output ----------
 
@@ -243,6 +261,16 @@ export const OpeningPeriod = z.object({
 });
 export type OpeningPeriod = z.infer<typeof OpeningPeriod>;
 
+export const PlacePhoto = z.object({
+  url: z.url(),
+  attributions: z.array(z.object({
+  displayName: z.string(),
+  uri: z.url().optional(),
+  photoUri: z.url().optional(),
+  })).default([]),
+});
+export type PlacePhoto = z.infer<typeof PlacePhoto>;
+
 export const Stop = z.object({
   id: z.string(),
   name: z.string(),
@@ -255,11 +283,14 @@ export const Stop = z.object({
   ratingCount: z.number().optional(),
   visitMinutes: z.number().default(60),
   arrivalTime: hhmm.optional(),
+  arrivalDayOffset: z.number().int().min(0).max(1).optional(),
   openingHours: z.array(OpeningPeriod).optional(),
   /** 0..1 position along the day's route; used for ordering checks. */
   routeFraction: z.number().min(0).max(1).optional(),
   detourMinutes: z.number().optional(),
   mapsUrl: z.string().optional(),
+  /** Stable endpoint that resolves current photo URLs and author attribution on demand. */
+  photosUrl: z.string().optional(),
   /** Short labels such as the interest the stop matched ("Nature") or "Fuel stop". */
   tags: z.array(z.string()).optional(),
   source: SourceRef.optional(),
@@ -387,7 +418,9 @@ export const TravelOptionsQuery = z.object({
   roundTrip: z.boolean().default(false),
   travellers: z.number().int().min(1).max(9).default(1),
   maxDrivingHoursPerDay: z.number().min(1).max(14).default(6),
-});
+})
+  .refine((q) => q.endDate >= q.startDate, { message: 'endDate must be on or after startDate', path: ['endDate'] })
+  .refine((q) => withinTripDateLimit(q.startDate, q.endDate), { message: `Trip cannot exceed ${MAX_TRIP_DAYS} days`, path: ['endDate'] });
 export type TravelOptionsQuery = z.infer<typeof TravelOptionsQuery>;
 
 export const TravelOptions = z.object({

@@ -34,9 +34,7 @@ type Req = { ip?: string; headers: Record<string, string | string[] | undefined>
 type Res = { setHeader: (k: string, v: string) => void };
 
 export function clientIp(req: Req): string {
-  const fwd = req.headers['x-forwarded-for'];
-  const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim();
-  return first || req.ip || req.socket?.remoteAddress || 'unknown';
+  return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
 @Injectable()

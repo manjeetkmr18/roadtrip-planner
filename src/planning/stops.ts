@@ -139,6 +139,7 @@ export function toStop(r: RankedCandidate, freeDay: boolean): Stop {
     routeFraction: freeDay ? undefined : Math.round(r.routeFraction * 1000) / 1000,
     detourMinutes: freeDay ? 0 : r.detourMinutes,
     mapsUrl: c.mapsUrl,
+    photosUrl: c.sample ? undefined : `/api/places/photo?${new URLSearchParams({ placeId: c.id })}`,
     tags: stopTags(c.query, c.types),
     source: c.sample ? { name: 'Sample placeholder', retrievedAt: nowIso() } : { name: 'Google Places', url: c.mapsUrl, retrievedAt: nowIso() },
   };

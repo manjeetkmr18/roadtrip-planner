@@ -70,6 +70,7 @@ describe('Google Places adapter', () => {
   });
   it('searches along a route polyline and maps fields', async () => {
     let body: Record<string, unknown> = {};
+    let fieldMask = '';
     stubFetch(
       {
         places: [
@@ -85,13 +86,52 @@ describe('Google Places adapter', () => {
           },
         ],
       },
-      (_url, init) => (body = JSON.parse(String(init.body))),
+      (_url, init) => {
+        body = JSON.parse(String(init.body));
+        fieldMask = new Headers(init.headers).get('X-Goog-FieldMask') ?? '';
+      },
     );
     const ctx = new ProviderContext();
     const res = await new PlacesProvider('k').alongRoute('scenic nature park', 'abc', 10, ctx);
     expect(body.searchAlongRouteParameters).toEqual({ polyline: { encodedPolyline: 'abc' } });
-    expect(res[0]).toMatchObject({ id: 'ChIJ123', name: 'Sandbanks Provincial Park', ratingCount: 12000, openingHours: [{ day: 3, open: '08:00', close: '20:00' }], sample: false });
+    expect(res[0]).toMatchObject({
+      id: 'ChIJ123',
+      name: 'Sandbanks Provincial Park',
+      ratingCount: 12000,
+      openingHours: [{ day: 3, open: '08:00', close: '20:00' }],
+      sample: false,
+    });
+    expect(fieldMask).not.toContain('places.photos');
     expect(ctx.calls.placesTextSearchEnterprise).toBe(1);
+  });
+
+  it('resolves a current image URI and author attribution on demand without persisting photo references', async () => {
+    const requestedUrls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request) => {
+      requestedUrls.push(String(url));
+      const body = requestedUrls.length === 1
+        ? { photos: [{ name: 'places/ChIJ123/photos/photo-reference', authorAttributions: [{ displayName: 'A photographer', uri: 'https://example.com/author' }] }] }
+        : { photoUri: 'https://lh3.googleusercontent.com/photo-content' };
+      return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+    }));
+    const result = await new PlacesProvider('secret-api-key').photo('ChIJ123456789');
+
+    expect(result).toEqual({
+      url: 'https://lh3.googleusercontent.com/photo-content',
+      attributions: [{ displayName: 'A photographer', uri: 'https://example.com/author' }],
+    });
+    expect(requestedUrls[0]).toBe('https://places.googleapis.com/v1/places/ChIJ123456789');
+    expect(requestedUrls[1]).toContain('/places/ChIJ123/photos/photo-reference/media?');
+    expect(new URL(requestedUrls[1]).searchParams.get('key')).toBe('secret-api-key');
+    expect(new URL(requestedUrls[1]).searchParams.get('skipHttpRedirect')).toBe('true');
+  });
+
+  it('rejects invalid place IDs before making a photo request', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+
+    await expect(new PlacesProvider('k').photo('https://attacker.example/photo')).rejects.toThrow(/Invalid Google Place ID/);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

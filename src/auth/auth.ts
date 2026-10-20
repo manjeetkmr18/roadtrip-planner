@@ -24,7 +24,7 @@ import {
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import bcrypt from 'bcryptjs';
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DB, type Db } from '../db/db.module.js';
 import { authCodes, users } from '../db/schema.js';
@@ -91,14 +91,29 @@ export class AuthService {
 
   /** Emails a fresh code (replacing any earlier one). Returns false when one was sent under a minute ago. */
   private async sendCode(u: UserRow, purpose: Purpose): Promise<boolean> {
-    const recent = await this.db.query.authCodes.findFirst({
-      where: and(eq(authCodes.userId, u.id), eq(authCodes.purpose, purpose), gt(authCodes.createdAt, new Date(Date.now() - RESEND_SECONDS * 1000))),
+    const c = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`auth-code:${u.id}:${purpose}`}, 0))`);
+      const recent = await tx.query.authCodes.findFirst({
+        where: and(
+          eq(authCodes.userId, u.id),
+          eq(authCodes.purpose, purpose),
+          gt(authCodes.createdAt, new Date(Date.now() - RESEND_SECONDS * 1000)),
+        ),
+      });
+      if (recent) return null;
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      const minutes = CODE_MINUTES[purpose];
+      await tx.delete(authCodes).where(and(eq(authCodes.userId, u.id), eq(authCodes.purpose, purpose)));
+      await tx.insert(authCodes).values({
+        userId: u.id,
+        purpose,
+        codeHash: this.hash(purpose, u.id, code),
+        expiresAt: new Date(Date.now() + minutes * 60_000),
+      });
+      return code;
     });
-    if (recent) return false;
-    const c = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    if (!c) return false;
     const minutes = CODE_MINUTES[purpose];
-    await this.db.delete(authCodes).where(and(eq(authCodes.userId, u.id), eq(authCodes.purpose, purpose)));
-    await this.db.insert(authCodes).values({ userId: u.id, purpose, codeHash: this.hash(purpose, u.id, c), expiresAt: new Date(Date.now() + minutes * 60_000) });
     await this.mailer.send(codeEmail(purpose === 'verify_email' ? 'verify' : 'reset', u.email, c, minutes));
     return true;
   }
@@ -111,31 +126,36 @@ export class AuthService {
     const a = Buffer.from(row.codeHash, 'hex');
     const b = Buffer.from(this.hash(purpose, u.id, c), 'hex');
     if (a.length !== b.length || !timingSafeEqual(a, b)) {
-      await this.db.update(authCodes).set({ attempts: row.attempts + 1 }).where(eq(authCodes.id, row.id));
-      const left = MAX_ATTEMPTS - row.attempts - 1;
+      const [updated] = await this.db
+        .update(authCodes)
+        .set({ attempts: sql`${authCodes.attempts} + 1` })
+        .where(and(eq(authCodes.id, row.id), lt(authCodes.attempts, MAX_ATTEMPTS), gt(authCodes.expiresAt, new Date())))
+        .returning({ attempts: authCodes.attempts });
+      if (!updated) throw bad('That code has expired. Send a new one.');
+      const left = MAX_ATTEMPTS - updated.attempts;
       throw bad(left > 0 ? `That code isn't right. ${left} ${left === 1 ? 'try' : 'tries'} left.` : 'Too many wrong codes. Send a new one.');
     }
-    await this.db.delete(authCodes).where(eq(authCodes.id, row.id));
+    const [consumed] = await this.db
+      .delete(authCodes)
+      .where(and(eq(authCodes.id, row.id), lt(authCodes.attempts, MAX_ATTEMPTS), gt(authCodes.expiresAt, new Date())))
+      .returning({ id: authCodes.id });
+    if (!consumed) throw bad('That code has expired. Send a new one.');
   }
 
-  /**
-   * Verification is on wherever codes can be delivered: with Amazon SES (EMAIL_FROM), or locally where
-   * they're printed. A deployment without email yet keeps sign-up working instead of stranding users.
-   */
+  /** Verification is enabled whenever email is deliverable, including local console-based development. */
   get verificationOn() {
-    return this.mailer.configured || !this.env.VERCEL;
+    return this.mailer.configured || (!this.env.VERCEL && this.env.NODE_ENV !== 'production');
   }
 
   async register(c: Credentials) {
+    if (!this.verificationOn) {
+      throw new ServiceUnavailableException('Email verification is unavailable. Please try again later.');
+    }
     if (await this.findByEmail(c.email)) throw new ConflictException('An account with this email already exists');
     const [u] = await this.db
       .insert(users)
-      .values({ email: c.email, name: c.name, passwordHash: await bcrypt.hash(c.password, 10), emailVerifiedAt: this.verificationOn ? null : new Date() })
+      .values({ email: c.email, name: c.name, passwordHash: await bcrypt.hash(c.password, 10), emailVerifiedAt: null })
       .returning();
-    if (!this.verificationOn) {
-      this.log.warn('Email verification is off: set EMAIL_FROM (Amazon SES) to send sign-up codes');
-      return { ...this.session(u), codeSent: false };
-    }
     let codeSent = true;
     try {
       await this.sendCode(u, 'verify_email');
