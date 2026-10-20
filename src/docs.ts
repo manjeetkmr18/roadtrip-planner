@@ -4,7 +4,7 @@ import { Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
-import { TravelOptions, TravelOptionsQuery, TripAdjustmentRequest, TripPlan, TripRequest } from './core/index.js';
+import { TravelOptions, TravelOptionsQuery, TripAdjustmentRequest, TripAssistantApplyRequest, TripAssistantRequest, TripPlan, TripRequest } from './core/index.js';
 import type { Env } from './config/env.js';
 
 /**
@@ -129,6 +129,8 @@ export function buildOpenApi(serverUrl?: string): OpenAPIObject {
         TravelOptions: out(TravelOptions),
         Usage: out(Usage),
         TripAdjustmentRequest: json(TripAdjustmentRequest),
+        TripAssistantRequest: json(TripAssistantRequest),
+        TripAssistantApplyRequest: json(TripAssistantApplyRequest),
         PlaceAutocomplete: json(PlaceAutocomplete),
         PlaceDetails: json(PlaceDetails),
         PlacePhoto: json(PlacePhoto),
@@ -224,6 +226,31 @@ export function buildOpenApi(serverUrl?: string): OpenAPIObject {
           security: secured,
           parameters: [idParam],
           responses: { 201: ok('TripRecord', 'Queued'), ...errors(401, 402, 404) },
+        },
+      },
+      '/api/trips/{id}/assistant': {
+        post: {
+          tags: ['Trips'],
+          summary: 'Chat with the personal trip assistant',
+          description: 'Available to verified trip owners with Pro access or a persisted administrator role. Supports one-way and round-trip, drive and fly-and-drive trips. Returns a validated preference proposal or a clarification; route, dates, trip type, airports, and flight details cannot be changed. Requires configured Bedrock AI.',
+          security: secured,
+          parameters: [idParam],
+          requestBody: body('TripAssistantRequest'),
+          responses: {
+            201: result(objectResult({ reply: { type: 'string' }, needsClarification: { type: 'boolean' }, proposal: { anyOf: [ref('TripRequest'), { type: 'null' }] } }), 'Assistant reply and optional proposal'),
+            ...errors(400, 401, 403, 404, 409, 429, 503),
+          },
+        },
+      },
+      '/api/trips/{id}/assistant/apply': {
+        post: {
+          tags: ['Trips'],
+          summary: 'Confirm assistant preferences and queue a new plan',
+          description: 'Requires Pro access or a persisted administrator role. Checks the base plan version and monthly generation quota before saving the proposed request and queueing a replan.',
+          security: secured,
+          parameters: [idParam],
+          requestBody: body('TripAssistantApplyRequest'),
+          responses: { 201: ok('TripRecord', 'Queued'), ...errors(400, 401, 402, 403, 404, 409, 503) },
         },
       },
       '/api/trips/{id}/adjustments/preview': {

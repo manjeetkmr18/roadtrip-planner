@@ -436,6 +436,7 @@ export class TripPlanner {
       llm: p.llm,
       provider: ctx,
       creatorMode: req.preferences.creatorMode,
+      personalInstructions: req.preferences.personalInstructions,
     });
     const days: DayPlan[] = drafts.map((d, i) => {
       const input = dayInputs[i];
