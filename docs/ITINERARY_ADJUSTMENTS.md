@@ -41,6 +41,7 @@ Apply is conditional on the plan still matching the version used to make the pre
 - It is a structured quick-action flow, not a free-form AI chatbot. It does not send chat text or trip details to Bedrock.
 - Preview is a Pro-only feature because it may incur mapping and route-provider costs. Administrators receive Pro entitlement for testing, and provider calls can still incur costs. It currently does not call an AI model.
 - The web app displays the guided assistant entry point to eligible trip owners; free users are directed to the membership page to upgrade.
+- The lodging picker searches Google Places for nearby lodging. It requires live Google Places configuration (`GOOGLE_MAPS_API_KEY` and `PROVIDER_MODE=auto`); without it, no real hotel listings are available and the traveller can enter an address manually.
 - Existing forecasts and advisories are retained from the original destination-area plan; the UI explicitly labels this.
 
 Apply database migration `drizzle/0004_trip_adjustments.sql` before enabling these endpoints in an environment that has not applied it.

@@ -4,6 +4,42 @@ import { PlaceSearchProvider, sampleSuggestions } from './place-search.js';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('place suggestions', () => {
+  it('finds real lodging near the arrival area with a lodging-only Places search', async () => {
+    const fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        places: [{
+          id: 'ChIJhotel123456',
+          displayName: { text: 'Example Hotel' },
+          formattedAddress: '123 Main Street, Calgary, AB',
+          location: { latitude: 51.05, longitude: -114.07 },
+        }],
+      })),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const suggestions = await new PlaceSearchProvider('google-key').lodging('downtown', { lat: 51.04, lng: -114.06 });
+
+    expect(suggestions).toEqual([{
+      placeId: 'ChIJhotel123456',
+      title: 'Example Hotel',
+      subtitle: '123 Main Street, Calgary, AB',
+      address: '123 Main Street, Calgary, AB',
+      location: { lat: 51.05, lng: -114.07 },
+    }]);
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://places.googleapis.com/v1/places:searchText');
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      textQuery: 'downtown',
+      includedType: 'lodging',
+      strictTypeFiltering: true,
+      locationBias: { circle: { center: { latitude: 51.04, longitude: -114.06 } } },
+    });
+  });
+
+  it('does not fabricate lodging options when the Google key is missing', async () => {
+    await expect(new PlaceSearchProvider().lodging('', { lat: 51.04, lng: -114.06 }))
+      .rejects.toThrow('Hotel search needs GOOGLE_MAPS_API_KEY');
+  });
+
   it('suggests sample cities by prefix, with coordinates', () => {
     const s = sampleSuggestions('kin');
     expect(s[0]).toMatchObject({ title: 'Kingston', address: 'Kingston, ON' });
