@@ -13,6 +13,7 @@ describe('PlacesController photo metadata', () => {
     const controller = new PlacesController(
       { placeSearch: { live: true }, places: { photo: resolvePhoto } } as unknown as Providers,
       {} as AuthService,
+      { assertPro: vi.fn() } as never,
     );
 
     await expect(controller.photo(
@@ -27,6 +28,7 @@ describe('PlacesController photo metadata', () => {
     const controller = new PlacesController(
       { placeSearch: { live: false }, places: { photo: resolvePhoto } } as unknown as Providers,
       {} as AuthService,
+      { assertPro: vi.fn() } as never,
     );
 
     await expect(controller.photo(
@@ -34,5 +36,40 @@ describe('PlacesController photo metadata', () => {
       { headers: {}, ip: '192.0.2.2' } as never,
     )).rejects.toMatchObject({ status: 400 });
     expect(resolvePhoto).not.toHaveBeenCalled();
+  });
+});
+
+describe('PlacesController lodging search', () => {
+  it('checks Pro access and searches real nearby lodging', async () => {
+    const suggestions = [{ placeId: 'ChIJhotel123456', address: '123 Main Street, Calgary, AB' }];
+    const search = vi.fn(async () => suggestions);
+    const assertPro = vi.fn(async () => undefined);
+    const controller = new PlacesController(
+      { placeSearch: { live: true, lodging: search } } as unknown as Providers,
+      {} as AuthService,
+      { assertPro } as never,
+    );
+
+    await expect(controller.lodging(
+      { id: 'member-1' } as never,
+      { q: '', lat: 51.04, lng: -114.06 },
+    )).resolves.toEqual({ suggestions });
+    expect(assertPro).toHaveBeenCalledWith({ id: 'member-1' });
+    expect(search).toHaveBeenCalledWith('', { lat: 51.04, lng: -114.06 });
+  });
+
+  it('reports when live hotel suggestions are unavailable', async () => {
+    const search = vi.fn();
+    const controller = new PlacesController(
+      { placeSearch: { live: false, lodging: search } } as unknown as Providers,
+      {} as AuthService,
+      { assertPro: vi.fn(async () => undefined) } as never,
+    );
+
+    await expect(controller.lodging(
+      { id: 'member-2' } as never,
+      { q: '', lat: 51.04, lng: -114.06 },
+    )).rejects.toMatchObject({ status: 503 });
+    expect(search).not.toHaveBeenCalled();
   });
 });

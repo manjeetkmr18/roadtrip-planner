@@ -60,6 +60,49 @@ export class PlaceSearchProvider {
     return !!this.key;
   }
 
+  async lodging(input: string, near: LatLng): Promise<PlaceSuggestion[]> {
+    if (!this.key) throw new Error('Hotel search needs GOOGLE_MAPS_API_KEY');
+    const query = input.trim() || 'lodging';
+    const res = await fetchJson<{
+      places?: {
+        id: string;
+        displayName?: { text: string };
+        formattedAddress?: string;
+        location?: { latitude: number; longitude: number };
+      }[];
+    }>('Google Places lodging search', `${BASE}/places:searchText`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-goog-api-key': this.key,
+        'x-goog-fieldmask': 'places.id,places.displayName,places.formattedAddress,places.location',
+      },
+      body: JSON.stringify({
+        textQuery: query === 'lodging' ? 'hotels' : query,
+        includedType: 'lodging',
+        strictTypeFiltering: true,
+        maxResultCount: 6,
+        locationBias: {
+          circle: {
+            center: { latitude: near.lat, longitude: near.lng },
+            radius: 50_000,
+          },
+        },
+      }),
+      timeoutMs: 6_000,
+      retries: 0,
+    });
+    return (res.places ?? [])
+      .filter((place) => place.id && place.displayName?.text && place.location && place.formattedAddress)
+      .map((place) => ({
+        placeId: place.id,
+        title: place.displayName!.text,
+        subtitle: place.formattedAddress!,
+        address: place.formattedAddress!,
+        location: { lat: place.location!.latitude, lng: place.location!.longitude },
+      }));
+  }
+
   async suggest(input: string, opts: { session?: string; near?: LatLng } = {}): Promise<PlaceSuggestion[]> {
     const q = input.trim();
     if (q.length < 2) return [];
