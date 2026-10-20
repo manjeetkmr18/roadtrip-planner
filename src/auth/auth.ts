@@ -30,6 +30,7 @@ import { DB, type Db } from '../db/db.module.js';
 import { authCodes, complimentaryMembershipGrants, membershipSubscriptions, users } from '../db/schema.js';
 import { ENV, type Env } from '../config/env.js';
 import { ZodPipe } from '../common/zod.pipe.js';
+import { ApiEndpoint } from '../common/api-docs.decorator.js';
 import { clientIp, RateLimiter } from '../common/rate-limit.js';
 import { ensureAuthSchema } from './auth-schema.js';
 import { codeEmail, Mailer } from './mailer.js';
@@ -319,18 +320,21 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Post('register')
+  @ApiEndpoint({ tag: 'Auth', summary: 'Create an account', response: { status: 201, description: 'Account created' }, errors: [400, 409, 429, 503] })
   register(@Body(new ZodPipe(Credentials)) body: Credentials) {
     return this.auth.register(body);
   }
 
   @Post('login')
   @HttpCode(200)
+  @ApiEndpoint({ tag: 'Auth', summary: 'Sign in', errors: [400, 401, 429] })
   login(@Body(new ZodPipe(Credentials.omit({ name: true }))) body: Credentials) {
     return this.auth.login(body);
   }
 
   @Get('me')
   @UseGuards(JwtGuard)
+  @ApiEndpoint({ tag: 'Auth', summary: 'Get the signed-in user and current membership', security: 'bearer', errors: [401] })
   me(@CurrentUser() user: AuthUser) {
     return this.auth.me(user.id);
   }
@@ -338,6 +342,7 @@ export class AuthController {
   @Post('verify-email')
   @HttpCode(200)
   @UseGuards(JwtGuard)
+  @ApiEndpoint({ tag: 'Auth', summary: 'Verify the signed-in account email', security: 'bearer', errors: [400, 401, 409, 429] })
   verifyEmail(@CurrentUser() user: AuthUser, @Body(new ZodPipe(VerifyBody)) body: z.infer<typeof VerifyBody>) {
     return this.auth.verifyEmail(user.id, body.code);
   }
@@ -345,12 +350,14 @@ export class AuthController {
   @Post('resend-verification')
   @HttpCode(200)
   @UseGuards(JwtGuard)
+  @ApiEndpoint({ tag: 'Auth', summary: 'Resend the email verification code', security: 'bearer', errors: [401, 429, 503] })
   resend(@CurrentUser() user: AuthUser) {
     return this.auth.resendVerification(user.id);
   }
 
   @Post('forgot-password')
   @HttpCode(200)
+  @ApiEndpoint({ tag: 'Auth', summary: 'Request a password reset code', errors: [400, 429, 503] })
   forgot(@Req() req: Req, @Body(new ZodPipe(ForgotBody)) body: z.infer<typeof ForgotBody>) {
     limit(this.forgotLimit, req);
     return this.auth.forgotPassword(body.email);
@@ -358,6 +365,7 @@ export class AuthController {
 
   @Post('reset-password')
   @HttpCode(200)
+  @ApiEndpoint({ tag: 'Auth', summary: 'Reset password using the emailed code', errors: [400, 429, 503] })
   reset(@Req() req: Req, @Body(new ZodPipe(ResetBody)) body: z.infer<typeof ResetBody>) {
     limit(this.resetLimit, req);
     return this.auth.resetPassword(body);

@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
-import { SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
+import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import { TravelOptions, TravelOptionsQuery, TripAdjustmentRequest, TripPlan, TripRequest } from './core/index.js';
@@ -269,6 +269,26 @@ export function buildOpenApi(serverUrl?: string): OpenAPIObject {
   } as unknown as OpenAPIObject;
 }
 
+export function mergeOpenApiDocuments(generated: OpenAPIObject, curated: OpenAPIObject): OpenAPIObject {
+  return {
+    ...generated,
+    ...curated,
+    paths: { ...generated.paths, ...curated.paths },
+    components: {
+      ...generated.components,
+      ...curated.components,
+      schemas: {
+        ...generated.components?.schemas,
+        ...curated.components?.schemas,
+      },
+      securitySchemes: {
+        ...generated.components?.securitySchemes,
+        ...curated.components?.securitySchemes,
+      },
+    },
+  };
+}
+
 function same(a: string, b: string): boolean {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
@@ -303,7 +323,16 @@ export function setupDocs(app: INestApplication, env: Env) {
   const guard = docsAuth(env.DOCS_USERNAME, env.DOCS_PASSWORD);
   // Protect the UI, its assets and the raw spec.
   app.use(['/api/docs', '/api/docs-json', '/api/docs-yaml'], guard);
-  SwaggerModule.setup('api/docs', app, buildOpenApi(), {
+  const generated = SwaggerModule.createDocument(
+    app,
+    new DocumentBuilder()
+      .setTitle('Travlio API')
+      .setVersion('1.0.0')
+      .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'bearer')
+      .addBasicAuth({ type: 'http', scheme: 'basic' }, 'docsBasic')
+      .build(),
+  );
+  SwaggerModule.setup('api/docs', app, mergeOpenApiDocuments(generated, buildOpenApi()), {
     jsonDocumentUrl: 'api/docs-json',
     yamlDocumentUrl: 'api/docs-yaml',
     customSiteTitle: 'Travlio API docs',

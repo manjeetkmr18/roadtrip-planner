@@ -10,6 +10,7 @@ import { AuthService } from '../auth/auth.js';
 import { airportByIata } from '../providers/airports.js';
 import { fetchJson, ProviderContext } from '../providers/infra.js';
 import { Providers } from '../providers/providers.module.js';
+import { ApiEndpoint } from '../common/api-docs.decorator.js';
 
 export type CheckStatus = 'ok' | 'fail' | 'off';
 export interface CheckResult {
@@ -65,12 +66,14 @@ export class IntegrationsController {
   /** A verified throwaway account so `npm run check:api` can test trips without reading email. */
   @Post('test-account')
   @HttpCode(201)
+  @ApiEndpoint({ tag: 'Health', summary: 'Create a verified temporary account for API checks', security: 'docs-basic', response: { status: 201, description: 'Test account created' }, errors: [401, 404, 503] })
   testAccount(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     this.docsAuth(req, res);
     return this.auth.testAccount();
   }
 
   @Get('integrations')
+  @ApiEndpoint({ tag: 'Health', summary: 'Run live integration diagnostics', description: 'Runs configured provider checks; may incur external API costs.', security: 'docs-basic', errors: [401, 404] })
   async integrations(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     this.docsAuth(req, res);
     res.setHeader('Cache-Control', 'no-store');

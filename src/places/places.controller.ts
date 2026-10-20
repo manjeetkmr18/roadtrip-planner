@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AuthService } from '../auth/auth.js';
 import { clientIp, RateLimiter } from '../common/rate-limit.js';
 import { ZodPipe } from '../common/zod.pipe.js';
+import { ApiEndpoint } from '../common/api-docs.decorator.js';
 import { Providers } from '../providers/providers.module.js';
 import { SESSION_TOKEN } from '../providers/place-search.js';
 
@@ -60,6 +61,7 @@ export class PlacesController {
   }
 
   @Get('autocomplete')
+  @ApiEndpoint({ tag: 'Places', summary: 'Suggest matching places', errors: [400, 429, 502] })
   async autocomplete(@Query(new ZodPipe(Suggest)) q: z.infer<typeof Suggest>, @Headers() h: Record<string, string | undefined>, @Req() req: Request) {
     this.budget(req);
     const near = q.lat !== undefined && q.lng !== undefined ? { lat: q.lat, lng: q.lng } : visitorLocation(h);
@@ -72,6 +74,7 @@ export class PlacesController {
   }
 
   @Get('details')
+  @ApiEndpoint({ tag: 'Places', summary: 'Resolve a place ID to address and coordinates', errors: [400, 429, 502] })
   async details(@Query(new ZodPipe(Details)) q: z.infer<typeof Details>, @Req() req: Request) {
     this.budget(req);
     if (!this.p.placeSearch.live) throw new BadRequestException('Place details need a Google key');
@@ -85,6 +88,7 @@ export class PlacesController {
 
   @Get('photo')
   @Header('Cache-Control', 'no-store')
+  @ApiEndpoint({ tag: 'Places', summary: 'Get photo metadata for a place', errors: [400, 429, 502] })
   async photo(
     @Query(new ZodPipe(Photo)) query: z.infer<typeof Photo>,
     @Req() req: Request,
