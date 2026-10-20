@@ -79,6 +79,8 @@ export const PreferencesInput = z.object({
   avoidFerries: z.boolean().default(false),
   /** Adds sunrise/sunset windows, viewpoints and a filming tip to each day. */
   creatorMode: z.boolean().default(false),
+  /** Traveller-specific planning preferences supplied through the trip assistant. */
+  personalInstructions: z.string().trim().max(1000).default(''),
 });
 export type PreferencesInput = z.infer<typeof PreferencesInput>;
 
@@ -169,6 +171,7 @@ export const TripRequest = z
       maxDetourMinutes: 45,
       avoidFerries: false,
       creatorMode: false,
+      personalInstructions: '',
     }),
     travel: TravelInput.default({ mode: 'drive', travellers: 1, rentalCar: true }),
   })
@@ -185,6 +188,28 @@ export const TripAdjustmentRequest = z.object({
   accommodation: PlaceInput,
 });
 export type TripAdjustmentRequest = z.infer<typeof TripAdjustmentRequest>;
+
+export const TripAssistantMessage = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string().trim().min(1).max(1000),
+});
+
+export const TripAssistantRequest = z.object({
+  messages: z.array(TripAssistantMessage).min(1).max(12),
+  draft: TripRequest.optional(),
+}).refine((value) => value.messages.at(-1)?.role === 'user', {
+  message: 'The last assistant message must be from the traveller.',
+  path: ['messages'],
+});
+
+export type TripAssistantRequest = z.infer<typeof TripAssistantRequest>;
+
+export const TripAssistantApplyRequest = z.object({
+  request: TripRequest,
+  baseGeneratedAt: z.string().min(1).max(50),
+});
+
+export type TripAssistantApplyRequest = z.infer<typeof TripAssistantApplyRequest>;
 
 // ---------- Plan output ----------
 

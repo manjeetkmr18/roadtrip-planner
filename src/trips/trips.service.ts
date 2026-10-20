@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, HttpException, HttpStatus, OnApplicationShutdown, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, HttpException, HttpStatus, OnApplicationShutdown, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { and, count, desc, eq, gte, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { LatLng, TravelOptionsQuery, TripRequest, type TripRequest as TripRequestType } from '../core/index.js';
@@ -24,6 +24,22 @@ function staleJobCondition(status: 'queued' | 'generating', cutoff: Date) {
   return status === 'queued'
     ? lt(generationJobs.queuedAt, cutoff)
     : or(lt(generationJobs.heartbeatAt, cutoff), and(isNull(generationJobs.heartbeatAt), lt(generationJobs.queuedAt, cutoff)));
+}
+
+function tripStructure(request: TripRequestType) {
+  return {
+    title: request.title,
+    origin: request.origin,
+    destination: request.destination,
+    waypoints: request.waypoints,
+    startDate: request.startDate,
+    endDate: request.endDate,
+    departureTime: request.departureTime,
+    roundTrip: request.roundTrip,
+    currency: request.currency,
+    vehicle: request.vehicle,
+    travel: request.travel,
+  };
 }
 
 /** Where generation jobs go: BullMQ in normal operation, in-process when QUEUE_INLINE=true. */
@@ -174,11 +190,22 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
     });
   }
 
-  async requestGeneration(user: AuthUser, id: string) {
+  async requestGeneration(user: AuthUser, id: string, proposedRequest?: TripRequest, expectedGeneratedAt?: string) {
+    const validatedProposal = proposedRequest ? TripRequest.parse(proposedRequest) : undefined;
+    if (validatedProposal && !expectedGeneratedAt) throw new BadRequestException('A base plan version is required to apply assistant changes.');
     const admission = await this.db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${user.id}, 0))`);
       let trip = await tx.query.trips.findFirst({ where: and(eq(trips.id, id), eq(trips.userId, user.id)) });
       if (!trip) throw new NotFoundException('Trip not found');
+      if (validatedProposal && (trip.status !== 'ready' || !trip.plan || trip.plan.generatedAt !== expectedGeneratedAt)) {
+        throw new ConflictException('The trip changed while you were chatting. Reload the latest plan and try again.');
+      }
+      if (validatedProposal) {
+        const currentRequest = TripRequest.parse(trip.request);
+        if (JSON.stringify(tripStructure(validatedProposal)) !== JSON.stringify(tripStructure(currentRequest))) {
+          throw new BadRequestException('The trip assistant can update preferences only; route, dates, vehicle, and flight details must stay unchanged.');
+        }
+      }
 
       if (trip.status === 'queued' || trip.status === 'generating') {
         const job = await tx.query.generationJobs.findFirst({
@@ -251,10 +278,20 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
 
       const [updated] = await tx
         .update(trips)
-        .set({ status: 'queued', error: null })
-        .where(and(eq(trips.id, id), eq(trips.userId, user.id), inArray(trips.status, ['draft', 'ready', 'failed'])))
+        .set({
+          status: 'queued',
+          error: null,
+          ...(validatedProposal ? { request: validatedProposal, title: this.defaultTitle(validatedProposal) } : {}),
+        })
+        .where(and(
+          eq(trips.id, id),
+          eq(trips.userId, user.id),
+          ...(validatedProposal ? [eq(trips.status, 'ready')] : [inArray(trips.status, ['draft', 'ready', 'failed'])]),
+          ...(expectedGeneratedAt ? [sql`${trips.plan}->>'generatedAt' = ${expectedGeneratedAt}`] : []),
+        ))
         .returning();
       if (!updated) {
+        if (validatedProposal) throw new ConflictException('The trip changed while you were chatting. Reload the latest plan and try again.');
         const latest = await tx.query.trips.findFirst({ where: and(eq(trips.id, id), eq(trips.userId, user.id)) });
         if (!latest) throw new NotFoundException('Trip not found');
         return { trip: latest, generationId: undefined };

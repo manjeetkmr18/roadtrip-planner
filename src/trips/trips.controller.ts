@@ -1,9 +1,10 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
-import { TravelOptionsQuery, TripAdjustmentRequest, TripRequest } from '../core/index.js';
+import { TravelOptionsQuery, TripAdjustmentRequest, TripAssistantApplyRequest, TripAssistantRequest, TripRequest } from '../core/index.js';
 import { CurrentUser, VerifiedGuard, type AuthUser } from '../auth/auth.js';
 import { ZodPipe } from '../common/zod.pipe.js';
 import { ApiEndpoint } from '../common/api-docs.decorator.js';
+import { MembershipService } from '../membership/membership.service.js';
 import { TripsService } from './trips.service.js';
 import { TripAdjustmentsService } from './trip-adjustments.service.js';
 
@@ -19,6 +20,7 @@ export class TripsController {
   constructor(
     private readonly trips: TripsService,
     private readonly adjustments: TripAdjustmentsService,
+    private readonly membership: MembershipService,
   ) {}
 
   @Get()
@@ -85,6 +87,27 @@ export class TripsController {
     @Body(new ZodPipe(TripAdjustmentRequest)) body: TripAdjustmentRequest,
   ) {
     return this.adjustments.preview(user, id, body);
+  }
+
+  @Post(':id/assistant')
+  @ApiEndpoint({ tag: 'Trips', summary: 'Chat with the personal trip assistant and preview preference changes', security: 'bearer', response: { status: 201, description: 'Assistant reply and optional trip preference proposal' }, errors: [400, 401, 403, 404, 409, 429, 503] })
+  assistant(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodPipe(TripAssistantRequest)) body: TripAssistantRequest,
+  ) {
+    return this.adjustments.chat(user, id, body);
+  }
+
+  @Post(':id/assistant/apply')
+  @ApiEndpoint({ tag: 'Trips', summary: 'Confirm assistant preferences and queue a new trip plan', security: 'bearer', response: { status: 201, description: 'Preference update saved and trip plan queued' }, errors: [400, 401, 402, 403, 404, 409, 503] })
+  async applyAssistant(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodPipe(TripAssistantApplyRequest)) body: TripAssistantApplyRequest,
+  ) {
+    await this.membership.assertPro(user);
+    return this.trips.requestGeneration(user, id, body.request, body.baseGeneratedAt);
   }
 
   @Post(':id/adjustments/:adjustmentId/apply')

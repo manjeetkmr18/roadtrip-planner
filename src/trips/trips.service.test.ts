@@ -1,12 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { loadEnv } from '../config/env.js';
+import { TripRequest } from '../core/index.js';
 import type { Db } from '../db/db.module.js';
 import { generationJobs, generations, trips } from '../db/schema.js';
 import type { Providers } from '../providers/providers.module.js';
 import { GenerationQueue, TripsService } from './trips.service.js';
 
-type TestTrip = { id: string; userId: string; status: 'draft' | 'queued' | 'generating' | 'ready' | 'failed'; title: string; error: null; request: object };
+type TestTrip = { id: string; userId: string; status: 'draft' | 'queued' | 'generating' | 'ready' | 'failed'; title: string; error: null; request: object; plan?: { generatedAt: string } };
 type TestJob = { id: string; tripId: string; userId: string; status: 'queued' | 'generating' | 'completed' | 'failed' | 'released'; attempts: number; queuedAt: Date; heartbeatAt: Date | null; createdAt: Date };
 
 function harness(queue: GenerationQueue, pro = false, completedGenerations = 0, role = 'user') {
@@ -154,6 +155,57 @@ describe('TripsService generation admission', () => {
         message: expect.stringContaining('Upgrade to Travlio Pro'),
       },
     });
+  });
+
+  it('does not save an assistant proposal when plan quota admission fails', async () => {
+    const { service, tripsInDb } = harness({ enqueue: vi.fn(async () => undefined) } as GenerationQueue, false, 1);
+    const originalRequest = TripRequest.parse({
+      origin: { address: 'Toronto, ON' },
+      destination: { address: 'Calgary, AB' },
+      startDate: '2026-10-19',
+      endDate: '2026-10-20',
+    });
+    tripsInDb[0].status = 'ready';
+    tripsInDb[0].request = originalRequest;
+    tripsInDb[0].plan = { generatedAt: '2026-10-19T12:00:00.000Z' };
+    const proposal = TripRequest.parse({ ...originalRequest, preferences: { pace: 'relaxed' } });
+
+    await expect(service.requestGeneration(
+      { id: 'user-1', email: 'user@example.com', plan: 'free' },
+      'trip-1',
+      proposal,
+      tripsInDb[0].plan.generatedAt,
+    )).rejects.toMatchObject({ status: 402 });
+
+    expect(tripsInDb[0].request).toEqual(originalRequest);
+    expect(tripsInDb[0].status).toBe('ready');
+  });
+
+  it('rejects assistant proposals that alter route or travel details', async () => {
+    const { service, tripsInDb } = harness({ enqueue: vi.fn(async () => undefined) } as GenerationQueue);
+    const originalRequest = TripRequest.parse({
+      origin: { address: 'Toronto, ON' },
+      destination: { address: 'Calgary, AB' },
+      startDate: '2026-10-19',
+      endDate: '2026-10-20',
+    });
+    tripsInDb[0].status = 'ready';
+    tripsInDb[0].request = originalRequest;
+    tripsInDb[0].plan = { generatedAt: '2026-10-19T12:00:00.000Z' };
+    const proposal = TripRequest.parse({
+      ...originalRequest,
+      destination: { address: 'Vancouver, BC' },
+      preferences: { pace: 'relaxed' },
+    });
+
+    await expect(service.requestGeneration(
+      { id: 'user-1', email: 'user@example.com', plan: 'free' },
+      'trip-1',
+      proposal,
+      tripsInDb[0].plan.generatedAt,
+    )).rejects.toMatchObject({ status: 400 });
+
+    expect(tripsInDb[0].status).toBe('ready');
   });
 });
 

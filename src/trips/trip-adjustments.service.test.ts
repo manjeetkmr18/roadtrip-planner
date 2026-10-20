@@ -1,6 +1,6 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { encodePolyline, TripAdjustmentRequest, TripPlan } from '../core/index.js';
+import { encodePolyline, TripAdjustmentRequest, TripAssistantRequest, TripPlan, TripRequest } from '../core/index.js';
 import type { AuthUser } from '../auth/auth.js';
 import { loadEnv } from '../config/env.js';
 import type { Db } from '../db/db.module.js';
@@ -137,6 +137,79 @@ describe('TripAdjustmentsService.preview', () => {
     expect(findTrip).not.toHaveBeenCalled();
     expect(resolvePlace).not.toHaveBeenCalled();
     expect(computeRoute).not.toHaveBeenCalled();
+  });
+});
+
+describe('TripAdjustmentsService.chat', () => {
+  const user: AuthUser = { id: 'pro-user', email: 'person@example.com', plan: 'pro' };
+  const input = TripAssistantRequest.parse({ messages: [{ role: 'user', content: 'Make it family friendly and less rushed.' }] });
+  const preferences = {
+    pace: 'relaxed',
+    maxDrivingHoursPerDay: 4,
+    interests: ['family activities', 'nature'],
+    includeParking: true,
+    maxDetourMinutes: 45,
+    avoidFerries: false,
+    creatorMode: false,
+    personalInstructions: 'Prefer family-friendly stops and a relaxed pace.',
+  };
+
+  function service(tripRequest: ReturnType<typeof TripRequest.parse>, completeJson: ReturnType<typeof vi.fn>) {
+    const trip = { status: 'ready', request: tripRequest, plan: { ...basePlan, request: tripRequest } };
+    return new TripAdjustmentsService(
+      { query: { trips: { findFirst: vi.fn().mockResolvedValue(trip) } } } as unknown as Db,
+      loadEnv({}),
+      { llm: { enabled: true, completeJson } } as unknown as Providers,
+      { assertPro: vi.fn().mockResolvedValue(undefined) } as unknown as MembershipService,
+    );
+  }
+
+  it('returns a validated preference proposal without altering any trip or flight details', async () => {
+    const airport = { iata: 'YYZ', name: 'Toronto Pearson', city: 'Toronto', country: 'Canada', location: toronto };
+    const outbound = {
+      id: 'flight-1',
+      from: airport,
+      to: { ...airport, iata: 'YYC', name: 'Calgary International', city: 'Calgary', location: calgary },
+      departLocal: '2026-10-19T08:00',
+      arriveLocal: '2026-10-19T10:00',
+      durationMinutes: 120,
+      stops: 0,
+      carrier: 'Test Air',
+      segments: [],
+      price: null,
+      currency: 'CAD',
+      travellers: 1,
+      sample: true,
+      source: { name: 'Test', retrievedAt: '2026-10-19T12:00:00.000Z' },
+      searchUrl: 'https://example.com',
+    };
+    const request = TripRequest.parse({ ...basePlan.request, roundTrip: true, travel: { mode: 'fly_drive', outbound } });
+    const completeJson = vi.fn().mockResolvedValue({
+      reply: 'I suggest a relaxed, family-friendly plan.',
+      needsClarification: false,
+      preferences,
+    });
+
+    const result = await service(request, completeJson).chat(user, 'trip-1', input);
+
+    expect(result.proposal?.preferences).toMatchObject({ pace: 'relaxed', maxDrivingHoursPerDay: 4 });
+    expect(result.proposal?.roundTrip).toBe(true);
+    expect(result.proposal?.travel).toEqual(request.travel);
+  });
+
+  it('fails explicitly when the assistant is not configured or returns invalid structured output', async () => {
+    const request = TripRequest.parse(basePlan.request);
+    const trip = { status: 'ready', request, plan: { ...basePlan, request } };
+    const missingAssistant = new TripAdjustmentsService(
+      { query: { trips: { findFirst: vi.fn().mockResolvedValue(trip) } } } as unknown as Db,
+      loadEnv({}),
+      { llm: { enabled: false } } as unknown as Providers,
+      { assertPro: vi.fn().mockResolvedValue(undefined) } as unknown as MembershipService,
+    );
+    await expect(missingAssistant.chat(user, 'trip-1', input)).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    const invalidAssistant = service(request, vi.fn().mockResolvedValue({ reply: 'No structured preferences.' }));
+    await expect(invalidAssistant.chat(user, 'trip-1', input)).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 });
 
