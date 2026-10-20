@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { TravelOptionsQuery, TripAdjustmentRequest, TripAssistantApplyRequest, TripAssistantRequest, TripRequest } from '../core/index.js';
+import { ASSISTANT_PRO_MESSAGE } from './assistant.js';
 import { CurrentUser, VerifiedGuard, type AuthUser } from '../auth/auth.js';
 import { ZodPipe } from '../common/zod.pipe.js';
 import { ApiEndpoint } from '../common/api-docs.decorator.js';
@@ -106,7 +107,7 @@ export class TripsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodPipe(TripAssistantApplyRequest)) body: TripAssistantApplyRequest,
   ) {
-    await this.membership.assertPro(user);
+    await this.membership.assertPro(user, ASSISTANT_PRO_MESSAGE);
     return this.trips.requestGeneration(user, id, body.request, body.baseGeneratedAt);
   }
 

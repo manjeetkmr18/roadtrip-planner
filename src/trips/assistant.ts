@@ -7,6 +7,7 @@ import type { PreferencesInput, TripPlan, TripRequest } from '../core/index.js';
  */
 
 export const ASSISTANT_MAX_TOKENS = 1500;
+export const ASSISTANT_PRO_MESSAGE = 'The trip assistant is part of Travlio Pro.';
 
 /** What the model is asked to return (Bedrock tool input schema). */
 export const ASSISTANT_SCHEMA = {

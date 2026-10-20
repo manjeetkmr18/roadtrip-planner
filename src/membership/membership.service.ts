@@ -143,8 +143,9 @@ export class MembershipService {
     };
   }
 
-  async assertPro(user: AuthUser): Promise<void> {
-    if (!(await this.hasPro(user.id))) throw new ForbiddenException('Trip arrival adjustments require an active Travlio Pro membership.');
+  /** Throws 403 with code PRO_REQUIRED (so clients can offer the upgrade) unless the user has Pro. */
+  async assertPro(user: AuthUser, message = 'Trip arrival adjustments require an active Travlio Pro membership.'): Promise<void> {
+    if (!(await this.hasPro(user.id))) throw new ForbiddenException({ message, code: 'PRO_REQUIRED' });
   }
 
   async usage(user: AuthUser) {

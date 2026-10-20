@@ -75,6 +75,7 @@ describe('MembershipService', () => {
     await expect(service.assertPro(user)).rejects.toMatchObject({
       status: 403,
       message: 'Trip arrival adjustments require an active Travlio Pro membership.',
+      response: { code: 'PRO_REQUIRED' },
     });
     expect(findFirst).toHaveBeenLastCalledWith(expect.objectContaining({
       where: expect.anything(),

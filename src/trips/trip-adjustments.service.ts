@@ -15,7 +15,7 @@ import { localIso } from '../planning/planner.js';
 import { timeZoneAt } from '../core/timezone.js';
 import { MembershipService } from '../membership/membership.service.js';
 import { RateLimiter } from '../common/rate-limit.js';
-import { ASSISTANT_MAX_TOKENS, ASSISTANT_SCHEMA, ASSISTANT_SYSTEM, planDigest, readAssistantOutput } from './assistant.js';
+import { ASSISTANT_MAX_TOKENS, ASSISTANT_PRO_MESSAGE, ASSISTANT_SCHEMA, ASSISTANT_SYSTEM, planDigest, readAssistantOutput } from './assistant.js';
 
 const HOTEL_RADIUS_METERS = 100_000;
 
@@ -176,7 +176,7 @@ export class TripAdjustmentsService {
   }
 
   async chat(user: AuthUser, tripId: string, input: TripAssistantRequest) {
-    await this.membership.assertPro(user);
+    await this.membership.assertPro(user, ASSISTANT_PRO_MESSAGE);
     if (this.assistantLimit.hit(user.id)) {
       throw new HttpException({ statusCode: 429, message: 'Too many assistant messages. Try again in a minute.' }, HttpStatus.TOO_MANY_REQUESTS);
     }
