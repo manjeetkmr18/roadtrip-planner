@@ -41,7 +41,7 @@ export const DeleteUserRequest = z.object({
 
 const BILLING_STATES = ['incomplete', 'trialing', 'active', 'past_due', 'cancel_pending', 'unpaid', 'paused'] as const;
 const effectivePlan = sql<string>`CASE
-  WHEN EXISTS (
+  WHEN ${users.role} = 'admin' OR EXISTS (
     SELECT 1 FROM membership_subscriptions s
     WHERE s.user_id = ${users.id}
       AND s.status IN ('active', 'trialing', 'cancel_pending')
@@ -200,7 +200,7 @@ export class AdminService {
           ['active', 'trialing', 'cancel_pending'].includes(subscription.status) &&
           subscription.currentPeriodEnd !== null &&
           subscription.currentPeriodEnd > new Date(),
-        ) || grants.some((grant) => !grant.revokedAt && grant.expiresAt > new Date()) ? 'pro' : 'free',
+        ) || grants.some((grant) => !grant.revokedAt && grant.expiresAt > new Date()) || user.role === 'admin' ? 'pro' : 'free',
         emailVerified: !!user.emailVerifiedAt,
       },
       trips: userTrips,

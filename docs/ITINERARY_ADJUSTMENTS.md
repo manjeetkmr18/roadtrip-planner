@@ -4,7 +4,7 @@ The trip screen in the Expo app and web app offers an **Arriving late? Go to lod
 
 ## API
 
-All endpoints require an authenticated, email-verified owner of the trip. Preview additionally requires an active Travlio Pro membership. The API checks the persisted subscription status and period end before making any geocoding, routing, road-event, or cost-provider calls; a free account receives `403 Forbidden`. Apply and undo remain available for an existing proposal so membership changes cannot strand an in-progress adjustment.
+All endpoints require an authenticated, email-verified owner of the trip. Preview additionally requires an active Travlio Pro membership or an administrator role persisted in the database. The API checks entitlement before making any geocoding, routing, road-event, or cost-provider calls; an ineligible free account receives `403 Forbidden`. Apply and undo remain available for an existing proposal so membership changes cannot strand an in-progress adjustment.
 
 ### Preview
 
@@ -39,7 +39,8 @@ Apply is conditional on the plan still matching the version used to make the pre
 - Lodging must be within 100 km of the destination. This scopes the added route to the final arrival leg; it does not regenerate the earlier trip route.
 - Does not book accommodation. Arrival and resume times are traveller-provided estimates.
 - It is a structured quick-action flow, not a free-form AI chatbot. It does not send chat text or trip details to Bedrock.
-- Preview is a Pro-only feature because it may incur mapping and route-provider costs. It currently does not call an AI model.
+- Preview is a Pro-only feature because it may incur mapping and route-provider costs. Administrators receive Pro entitlement for testing, and provider calls can still incur costs. It currently does not call an AI model.
+- The web app displays the guided assistant entry point to eligible trip owners; free users are directed to the membership page to upgrade.
 - Existing forecasts and advisories are retained from the original destination-area plan; the UI explicitly labels this.
 
 Apply database migration `drizzle/0004_trip_adjustments.sql` before enabling these endpoints in an environment that has not applied it.

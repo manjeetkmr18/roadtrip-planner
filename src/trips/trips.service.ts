@@ -63,7 +63,8 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
   private readonly optionsCache = new TtlCache<TravelOptions>(10 * 60_000);
 
   private async hasPro(tx: Parameters<Parameters<Db['transaction']>[0]>[0], userId: string) {
-    const [subscription, grant] = await Promise.all([
+    const [account, subscription, grant] = await Promise.all([
+      tx.query.users.findFirst({ where: eq(users.id, userId), columns: { role: true } }),
       tx.query.membershipSubscriptions.findFirst({
         where: and(
           eq(membershipSubscriptions.userId, userId),
@@ -79,7 +80,7 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
         ),
       }),
     ]);
-    return !!(subscription || grant);
+    return account?.role === 'admin' || !!(subscription || grant);
   }
 
   async travelOptions(query: TravelOptionsQuery) {
@@ -239,7 +240,11 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
       const limit = plan === 'pro' ? null : this.env.FREE_TRIPS_PER_MONTH;
       if (limit != null && completed.n + reserved.n >= limit) {
         throw new HttpException(
-          `You’ve used your ${limit} free trip plans this month. Your saved trips stay available, and you can plan again next month.`,
+          {
+            statusCode: HttpStatus.PAYMENT_REQUIRED,
+            code: 'FREE_PLAN_LIMIT',
+            message: `You’ve used your ${limit} free trip plans this month. Your saved trips stay available. Upgrade to Travlio Pro to keep planning now.`,
+          },
           HttpStatus.PAYMENT_REQUIRED,
         );
       }
