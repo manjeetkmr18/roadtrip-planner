@@ -208,8 +208,31 @@ describe('TripAdjustmentsService.chat', () => {
     );
     await expect(missingAssistant.chat(user, 'trip-1', input)).rejects.toBeInstanceOf(ServiceUnavailableException);
 
-    const invalidAssistant = service(request, vi.fn().mockResolvedValue({ reply: 'No structured preferences.' }));
+    const invalidAssistant = service(request, vi.fn().mockResolvedValue({ preferences: {} }));
     await expect(invalidAssistant.chat(user, 'trip-1', input)).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    const failingAssistant = service(request, vi.fn().mockRejectedValue(new Error('ThrottlingException')));
+    await expect(failingAssistant.chat(user, 'trip-1', input)).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('answers questions from the plan without proposing a change', async () => {
+    const request = TripRequest.parse(basePlan.request);
+    const completeJson = vi.fn().mockResolvedValue({
+      reply: 'Day 1 is about 1 hour of driving, with a stop at Scenic stop at 09:00.',
+      proposeChanges: false,
+      needsClarification: false,
+      preferences: request.preferences,
+    });
+    const question = TripAssistantRequest.parse({ messages: [{ role: 'user', content: 'What does day 1 look like?' }] });
+
+    const result = await service(request, completeJson).chat(user, 'trip-1', question);
+
+    expect(result.reply).toContain('Scenic stop');
+    expect(result.proposal).toBeNull();
+    const prompt = JSON.parse(completeJson.mock.calls[0][0].prompt);
+    expect(prompt.plan.days[0]).toMatchObject({ day: 1, from: 'Toronto, ON', to: 'Calgary, AB', drivingHours: 1, distanceKm: 100 });
+    expect(prompt.plan.days[0].stops.map((s: { name: string }) => s.name)).toContain('Scenic stop');
+    expect(prompt.conversation).toEqual(question.messages);
   });
 });
 
