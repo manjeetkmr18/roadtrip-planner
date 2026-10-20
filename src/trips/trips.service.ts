@@ -5,7 +5,7 @@ import { LatLng, TravelOptionsQuery, TripRequest, type TripRequest as TripReques
 import { ExchangeRates } from '../providers/fx.js';
 import { TtlCache } from '../providers/infra.js';
 import { travelOptions } from '../planning/travel-options.js';
-import type { TravelOptions } from '../core/index.js';
+import type { TravelOptions, TripPlan } from '../core/index.js';
 import { DB, type Db } from '../db/db.module.js';
 import { complimentaryMembershipGrants, generationJobs, generations, membershipSubscriptions, trips, tripStops, users } from '../db/schema.js';
 import { ENV, type Env } from '../config/env.js';
@@ -523,10 +523,21 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
     return { shareToken: trip.shareToken };
   }
 
+  /** Turns sharing off: the old link stops working, and sharing again makes a new link. */
+  async unshare(user: AuthUser, id: string) {
+    const [trip] = await this.db
+      .update(trips)
+      .set({ shareToken: null })
+      .where(and(eq(trips.id, id), eq(trips.userId, user.id)))
+      .returning({ id: trips.id });
+    if (!trip) throw new NotFoundException('Trip not found');
+    return { shareToken: null };
+  }
+
   async getShared(token: string) {
     const t = await this.db.query.trips.findFirst({ where: eq(trips.shareToken, token) });
     if (!t || !t.plan) throw new NotFoundException('Shared trip not found');
-    return { id: t.id, title: t.title, status: t.status, plan: t.plan, updatedAt: t.updatedAt };
+    return { id: t.id, title: t.title, status: t.status, plan: publicPlan(t.plan), updatedAt: t.updatedAt };
   }
 
   /** Stops near a point from the user's saved trips (PostGIS), e.g. "places I already planned near here". */
@@ -543,4 +554,17 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
       ORDER BY meters LIMIT 50`);
     return rows.rows;
   }
+}
+
+/**
+ * What a shared link shows. Anyone with the link can read it, so the owner's private notes to the
+ * assistant, internal provider notes and the API spend are left out.
+ */
+export function publicPlan(plan: TripPlan): TripPlan {
+  return {
+    ...plan,
+    request: { ...plan.request, preferences: { ...plan.request.preferences, personalInstructions: '' } },
+    providerNotes: [],
+    apiCostUsd: 0,
+  };
 }

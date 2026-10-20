@@ -6,7 +6,10 @@
 - [x] Make email-code cooldown, attempt counting, and one-time use safe under concurrent requests.
 - [x] Require production email configuration and prevent verification codes from falling back to logs.
 - [x] Add an explicit trusted-proxy CIDR setting; never trust forwarded headers by default.
-- [ ] Confirm proxy CIDRs for deployment and configure a shared rate limiter for multiple instances.
+- [x] Use Vercel's client-address header for rate limits on Vercel.
+- [ ] Configure a shared rate limiter (e.g. Upstash Redis) so limits hold across instances.
+- [x] Sign out other sessions on password reset; reject tokens for deleted accounts.
+- [x] Hide private notes from shared links; allow turning sharing off.
 - [ ] Complete auth/CORS/health production-default review.
 
 ## Phase 2 — Generation reliability and quota control

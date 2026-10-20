@@ -33,7 +33,17 @@ export class RateLimiter {
 type Req = { ip?: string; headers: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } };
 type Res = { setHeader: (k: string, v: string) => void };
 
-export function clientIp(req: Req): string {
+/**
+ * The caller's IP. On Vercel the socket address can be Vercel's own infrastructure rather than the client, so
+ * the x-vercel-forwarded-for header is used instead: Vercel sets it and overwrites any value a client sends.
+ * Elsewhere, forwarded headers are only honoured through Express's trust proxy (TRUSTED_PROXY_CIDRS).
+ */
+export function clientIp(req: Req, onVercel = !!process.env.VERCEL): string {
+  if (onVercel) {
+    const raw = req.headers['x-vercel-forwarded-for'];
+    const first = (Array.isArray(raw) ? raw[0] : raw)?.split(',')[0]?.trim();
+    if (first) return first;
+  }
   return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 

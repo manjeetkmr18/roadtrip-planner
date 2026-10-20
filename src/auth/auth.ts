@@ -250,7 +250,12 @@ export class AuthService {
     // The code proves they own the address, so this also verifies it.
     const [v] = await this.db
       .update(users)
-      .set({ passwordHash: await bcrypt.hash(b.password, 10), emailVerifiedAt: u.emailVerifiedAt ?? new Date() })
+      .set({
+        passwordHash: await bcrypt.hash(b.password, 10),
+        emailVerifiedAt: u.emailVerifiedAt ?? new Date(),
+        // Signs out every other device: tokens issued before this second stop working.
+        sessionsValidAfter: wholeSecond(new Date()),
+      })
       .where(eq(users.id, u.id))
       .returning();
     return this.session(v);
@@ -267,42 +272,70 @@ export class AuthService {
     return this.session(u);
   }
 
+  /** Checks the signature and expiry only. Use authenticate() to also check the account still allows the token. */
   verify(token: string): AuthUser {
     const p = this.jwt.verify<{ sub: string; email: string; plan: string; ev?: boolean }>(token);
     return { id: p.sub, email: p.email, plan: p.plan, emailVerified: p.ev };
   }
+
+  /**
+   * Verifies the token and checks the account in the database: deleted accounts and tokens issued
+   * before the last password reset are rejected. emailVerified comes from the database, so it is current.
+   */
+  async authenticate(token: string): Promise<AuthUser> {
+    const p = this.jwt.verify<{ sub: string; email: string; plan: string; ev?: boolean; iat?: number }>(token);
+    await ensureAuthSchema(this.db);
+    const u = await this.db.query.users.findFirst({
+      where: eq(users.id, p.sub),
+      columns: { emailVerifiedAt: true, sessionsValidAfter: true },
+    });
+    if (!u) throw new UnauthorizedException('Session expired, please sign in again');
+    if (!sessionStillValid(p.iat, u.sessionsValidAfter)) throw new UnauthorizedException('Session expired, please sign in again');
+    return { id: p.sub, email: p.email, plan: p.plan, emailVerified: !!u.emailVerifiedAt };
+  }
+}
+
+/** Drops the milliseconds, so a token issued in the same second (JWT iat is whole seconds) stays valid. */
+export function wholeSecond(d: Date) {
+  return new Date(Math.floor(d.getTime() / 1000) * 1000);
+}
+
+/** A token is valid unless it was issued before the account's sessionsValidAfter time. */
+export function sessionStillValid(issuedAtSeconds: number | undefined, validAfter: Date | null | undefined) {
+  if (!validAfter) return true;
+  if (typeof issuedAtSeconds !== 'number') return false;
+  return issuedAtSeconds >= Math.floor(validAfter.getTime() / 1000);
 }
 
 @Injectable()
 export class JwtGuard implements CanActivate {
   constructor(private readonly auth: AuthService) {}
-  canActivate(ctx: ExecutionContext): boolean {
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest();
     const header: string | undefined = req.headers['authorization'];
     if (!header?.startsWith('Bearer ')) throw new UnauthorizedException('Sign in required');
     try {
-      req.user = this.auth.verify(header.slice(7));
+      req.user = await this.auth.authenticate(header.slice(7));
       return true;
-    } catch {
-      throw new UnauthorizedException('Session expired, please sign in again');
+    } catch (e) {
+      if (e instanceof UnauthorizedException) throw e;
+      // A bad signature or expired token. Database errors are passed on, so an outage isn't reported as a sign-out.
+      if (e instanceof Error && ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(e.name)) {
+        throw new UnauthorizedException('Session expired, please sign in again');
+      }
+      throw e;
     }
   }
 }
 
-/**
- * Signed in AND email verified. The token says so after verification; otherwise (older tokens, or
- * verified on another device) the database decides.
- */
+/** Signed in AND email verified (read from the database by JwtGuard, so it is always current). */
 @Injectable()
 export class VerifiedGuard implements CanActivate {
-  constructor(
-    private readonly jwt: JwtGuard,
-    private readonly auth: AuthService,
-  ) {}
+  constructor(private readonly jwt: JwtGuard) {}
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
-    this.jwt.canActivate(ctx);
+    await this.jwt.canActivate(ctx);
     const user: AuthUser = ctx.switchToHttp().getRequest().user;
-    if (user.emailVerified || (await this.auth.isVerified(user.id))) return true;
+    if (user.emailVerified) return true;
     throw new ForbiddenException({ message: 'Verify your email to plan trips. We sent you a 6-digit code.', code: 'EMAIL_NOT_VERIFIED' });
   }
 }

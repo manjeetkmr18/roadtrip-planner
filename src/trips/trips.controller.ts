@@ -131,9 +131,15 @@ export class TripsController {
   }
 
   @Post(':id/share')
-  @ApiEndpoint({ tag: 'Trips', summary: 'Create or rotate a share link', security: 'bearer', response: { status: 201, description: 'Share link created' }, errors: [401, 403, 404] })
+  @ApiEndpoint({ tag: 'Trips', summary: 'Create a share link (returns the existing one if already shared)', security: 'bearer', response: { status: 201, description: 'Share link created' }, errors: [401, 403, 404] })
   share(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.trips.share(user, id);
+  }
+
+  @Delete(':id/share')
+  @ApiEndpoint({ tag: 'Trips', summary: 'Stop sharing: the share link stops working', security: 'bearer', errors: [401, 403, 404] })
+  unshare(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.trips.unshare(user, id);
   }
 }
 
