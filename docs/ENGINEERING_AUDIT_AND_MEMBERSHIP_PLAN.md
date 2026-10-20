@@ -25,6 +25,26 @@ This roadmap is grounded in the current Travlio road-trip planner product scope 
 - Separate accommodation search from route planning so that route generation can rank, filter and budget each stay type consistently.
 - Treat accommodation and trip-cost features as first-class stop categories in the planner, not as ad hoc search results.
 
+### 1.2 Post-change codebase rescan — 2026-10-20
+
+The repository now contains dedicated `users/`, `feedback/`, `places/`, and `health/` modules; a Stripe-backed `membership/` module; migrations `0002_generation_jobs.sql`, `0003_membership.sql`, and `0004_trip_adjustments.sql`; and tests for the new services. The modular-monolith direction is in place and should be extended incrementally rather than replaced with a new architecture.
+
+**Verification:** GitHub Actions CI passed on the feature branch commit `e57e4e33065e91372119f4e15d70502069e6a70c` (typecheck, tests, build, and database migrations), and the merge commit `691d2b7205311674bfae91539dde91f96c5206a8` also has a successful CI run. This verifies those automated checks, not a live Stripe payment, production deployment, or real provider billing behavior.
+
+**Remaining findings from source review:**
+
+| ID | Priority | Finding | Required action |
+|---|---|---|---|
+| RESCAN-01 | P1 | Pro users currently receive `limit: null` in both trip-generation admission and usage reporting, which means unlimited monthly generation. This conflicts with the fair-use/cost-control approach in this document. | Set an explicit Pro monthly allowance or a documented budget/concurrency policy before accepting payments. Enforce it atomically in the generation-admission transaction. |
+| RESCAN-02 | P1 | Trip-generation quota decisions use the cached `users.plan` field, while membership status is derived from subscription rows. If a subscription webhook is permanently missed or delayed, the cached plan can diverge from the effective subscription. | Add reconciliation and make entitlement/usage admission use a single authoritative policy; test expired subscriptions and missed-webhook recovery. |
+| RESCAN-03 | P1 | The global rate limiter and signed-out place-search budgets are in-memory per process. Authenticated place searches bypass the place-specific per-minute/day budget and rely on the global per-IP limit. | Before scaling or exposing paid provider-backed endpoints, add shared/distributed throttling plus per-account limits for expensive routes, places, and generation. |
+| RESCAN-04 | P2 | The integration health check's database-table list includes the original tables but omits `generation_jobs`, `membership_subscriptions`, `membership_webhook_events`, and `trip_adjustments`. A health check can therefore report the database schema as present while newer feature tables are missing. | Expand the required-table check and add a test that verifies all runtime-critical tables. |
+| RESCAN-05 | P2 / policy | Pro entitlement is checked before generating a trip-adjustment preview, but the apply endpoint does not re-check subscription status. That may be intentional if a valid preview remains usable after cancellation, but the rule is not explicit. | Decide whether entitlement is required at preview time only or at apply time too; document the rule and test cancellation between preview and apply. |
+| RESCAN-06 | P1 before paid launch | Stripe configuration validates that the configured prices are active recurring monthly/yearly prices, but application code does not enforce the intended currency or published amount. | Verify currency and amount in test/live configuration and either validate them in code or clearly treat Stripe as the pricing source of truth. |
+| RESCAN-07 | P1 before paid launch | Membership unit tests mock Stripe and the database; passing CI does not establish that real checkout, webhook delivery/retries, cancellation, refunds, and billing portal behavior work in the deployed Stripe account. | Complete the test-mode lifecycle in `docs/PAID_LAUNCH_CHECKLIST.md` and verify the deployed webhook endpoint before enabling live payments. |
+
+**Implemented since the earlier audit:** the membership API, Stripe Checkout/Portal integration, signed webhook verification and event deduplication, server-side Pro checks for trip-adjustment previews, saved adjustment snapshots with apply/undo, profile endpoints, and feature-module extraction. These are present in source; their production configuration and end-to-end behavior still require verification.
+
 ## 2. Current issues and risks
 
 ### 2.1 Input validation and planning

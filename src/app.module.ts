@@ -10,6 +10,7 @@ import { HealthModule } from './health/health.module.js';
 import { PlacesModule } from './places/places.module.js';
 import { UsersModule } from './users/users.module.js';
 import { MembershipModule } from './membership/membership.module.js';
+import { AdminModule } from './admin/admin.module.js';
 import { RateLimitGuard } from './common/rate-limit.js';
 
 @Global()
@@ -36,6 +37,7 @@ export class AppModule {
         PlacesModule,
         UsersModule,
         MembershipModule,
+        AdminModule,
       ],
       providers: [{ provide: APP_GUARD, useClass: RateLimitGuard }],
     };

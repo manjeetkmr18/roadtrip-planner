@@ -9,7 +9,7 @@ import { GenerationQueue, TripsService } from './trips.service.js';
 type TestTrip = { id: string; userId: string; status: 'draft' | 'queued' | 'generating' | 'ready' | 'failed'; title: string; error: null; request: object };
 type TestJob = { id: string; tripId: string; userId: string; status: 'queued' | 'generating' | 'completed' | 'failed' | 'released'; attempts: number; queuedAt: Date; heartbeatAt: Date | null; createdAt: Date };
 
-function harness(queue: GenerationQueue) {
+function harness(queue: GenerationQueue, pro = false, completedGenerations = 0) {
   const user = { id: 'user-1', plan: 'free' };
   const tripsInDb: TestTrip[] = [
     { id: 'trip-1', userId: user.id, status: 'draft', title: 'Trip 1', error: null, request: {} },
@@ -31,10 +31,16 @@ function harness(queue: GenerationQueue) {
       users: {
         findFirst: vi.fn(async () => user),
       },
+      membershipSubscriptions: {
+        findFirst: vi.fn(async () => undefined),
+      },
+      complimentaryMembershipGrants: {
+        findFirst: vi.fn(async () => pro ? { id: 'grant-1', expiresAt: new Date(Date.now() + 60_000) } : undefined),
+      },
     },
     select: vi.fn(() => ({
       from: (table: unknown) => ({
-        where: async () => [{ n: table === generations ? 0 : jobs.filter((job) => job.status === 'queued' || job.status === 'generating').length }],
+        where: async () => [{ n: table === generations ? completedGenerations : jobs.filter((job) => job.status === 'queued' || job.status === 'generating').length }],
       }),
     })),
     update: vi.fn((table: unknown) => ({
@@ -90,7 +96,7 @@ function harness(queue: GenerationQueue) {
     },
   } as unknown as Db;
   const service = new TripsService(db, loadEnv({ QUEUE_INLINE: 'true', FREE_TRIPS_PER_MONTH: '1' }), queue, {} as Providers);
-  return { service, tripsInDb, jobs };
+  return { service, user, tripsInDb, jobs };
 }
 
 describe('TripsService generation admission', () => {
@@ -120,6 +126,14 @@ describe('TripsService generation admission', () => {
     await expect(service.requestGeneration(user, 'trip-1')).rejects.toMatchObject({ status: 503 });
     expect(jobs[0].status).toBe('released');
     expect(tripsInDb[0].status).toBe('failed');
+  });
+
+  it('uses an active complimentary grant when enforcing the generation quota', async () => {
+    const queue = { enqueue: vi.fn(async () => undefined) } as GenerationQueue;
+    const { service, user } = harness(queue, true, 1);
+
+    await expect(service.requestGeneration(user, 'trip-1')).resolves.toMatchObject({ status: 'queued' });
+    expect(queue.enqueue).toHaveBeenCalledOnce();
   });
 });
 

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, HttpException, HttpStatus, OnApplicationShutdown, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
-import { and, count, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { LatLng, TravelOptionsQuery, TripRequest, type TripRequest as TripRequestType } from '../core/index.js';
 import { ExchangeRates } from '../providers/fx.js';
@@ -7,7 +7,7 @@ import { TtlCache } from '../providers/infra.js';
 import { travelOptions } from '../planning/travel-options.js';
 import type { TravelOptions } from '../core/index.js';
 import { DB, type Db } from '../db/db.module.js';
-import { generationJobs, generations, trips, tripStops, users } from '../db/schema.js';
+import { complimentaryMembershipGrants, generationJobs, generations, membershipSubscriptions, trips, tripStops, users } from '../db/schema.js';
 import { ENV, type Env } from '../config/env.js';
 import { Providers } from '../providers/providers.module.js';
 import { ProviderContext } from '../providers/infra.js';
@@ -18,6 +18,7 @@ export const GENERATION_QUEUE = 'trip-generation';
 const STALE_JOB_MS = 60_000;
 const HEARTBEAT_MS = 15_000;
 const RECOVERY_INTERVAL_MS = 60_000;
+const PRO_STATUSES = ['active', 'trialing', 'cancel_pending'] as const;
 
 function staleJobCondition(status: 'queued' | 'generating', cutoff: Date) {
   return status === 'queued'
@@ -60,6 +61,26 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
 
   /** Same search within 10 minutes is answered from memory (route + flight calls cost money). */
   private readonly optionsCache = new TtlCache<TravelOptions>(10 * 60_000);
+
+  private async hasPro(tx: Parameters<Parameters<Db['transaction']>[0]>[0], userId: string) {
+    const [subscription, grant] = await Promise.all([
+      tx.query.membershipSubscriptions.findFirst({
+        where: and(
+          eq(membershipSubscriptions.userId, userId),
+          inArray(membershipSubscriptions.status, [...PRO_STATUSES]),
+          gt(membershipSubscriptions.currentPeriodEnd, new Date()),
+        ),
+      }),
+      tx.query.complimentaryMembershipGrants.findFirst({
+        where: and(
+          eq(complimentaryMembershipGrants.userId, userId),
+          isNull(complimentaryMembershipGrants.revokedAt),
+          gt(complimentaryMembershipGrants.expiresAt, new Date()),
+        ),
+      }),
+    ]);
+    return !!(subscription || grant);
+  }
 
   async travelOptions(query: TravelOptionsQuery) {
     const q = TravelOptionsQuery.parse(query);
@@ -145,9 +166,10 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
             inArray(generationJobs.status, ['queued', 'generating']),
           ),
         );
-      const u = await tx.query.users.findFirst({ where: eq(users.id, user.id) });
-      const limit = u?.plan === 'pro' ? null : this.env.FREE_TRIPS_PER_MONTH;
-      return { plan: u?.plan ?? 'free', usedThisMonth: row.n + reserved.n, limit };
+      const account = await tx.query.users.findFirst({ where: eq(users.id, user.id) });
+      const plan = (await this.hasPro(tx, user.id)) ? 'pro' : 'free';
+      const limit = plan === 'pro' ? null : this.env.FREE_TRIPS_PER_MONTH;
+      return { plan: account ? plan : 'free', usedThisMonth: row.n + reserved.n, limit };
     });
   }
 
@@ -213,7 +235,8 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
           ),
         );
       const account = await tx.query.users.findFirst({ where: eq(users.id, user.id) });
-      const limit = account?.plan === 'pro' ? null : this.env.FREE_TRIPS_PER_MONTH;
+      const plan = account && (await this.hasPro(tx, user.id)) ? 'pro' : 'free';
+      const limit = plan === 'pro' ? null : this.env.FREE_TRIPS_PER_MONTH;
       if (limit != null && completed.n + reserved.n >= limit) {
         throw new HttpException(
           `You’ve used your ${limit} free trip plans this month. Your saved trips stay available, and you can plan again next month.`,

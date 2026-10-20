@@ -4,7 +4,7 @@ import Stripe from 'stripe';
 import { z } from 'zod';
 import { ENV, type Env } from '../config/env.js';
 import { DB, type Db } from '../db/db.module.js';
-import { generationJobs, generations, membershipSubscriptions, membershipWebhookEvents, users } from '../db/schema.js';
+import { complimentaryMembershipGrants, generationJobs, generations, membershipSubscriptions, membershipWebhookEvents, users } from '../db/schema.js';
 import type { AuthUser } from '../auth/auth.js';
 
 export const CheckoutRequest = z.object({
@@ -82,6 +82,25 @@ export class MembershipService {
     });
   }
 
+  private activeGrant(userId: string) {
+    return this.db.query.complimentaryMembershipGrants.findFirst({
+      where: and(
+        eq(complimentaryMembershipGrants.userId, userId),
+        isNull(complimentaryMembershipGrants.revokedAt),
+        gt(complimentaryMembershipGrants.expiresAt, new Date()),
+      ),
+      orderBy: desc(complimentaryMembershipGrants.expiresAt),
+    });
+  }
+
+  async hasPro(userId: string) {
+    const [subscription, grant] = await Promise.all([
+      this.activeSubscription(userId),
+      this.activeGrant(userId),
+    ]);
+    return !!(subscription || grant);
+  }
+
   async plans() {
     const stripe = this.stripe();
     const entries = await Promise.all(
@@ -92,34 +111,44 @@ export class MembershipService {
 
   async me(user: AuthUser) {
     const active = await this.activeSubscription(user.id);
+    const grant = active ? undefined : await this.activeGrant(user.id);
     const subscription = active ?? (await this.db.query.membershipSubscriptions.findFirst({
       where: eq(membershipSubscriptions.userId, user.id),
       orderBy: desc(membershipSubscriptions.updatedAt),
     }));
     return {
-      plan: active ? 'pro' : 'free',
-      subscription: subscription
+      plan: active || grant ? 'pro' : 'free',
+      subscription: active
         ? {
-            plan: subscription.planCode,
-            status: subscription.status,
-            currentPeriodStart: subscription.currentPeriodStart,
-            currentPeriodEnd: subscription.currentPeriodEnd,
-            cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+            plan: active.planCode,
+            status: active.status,
+            currentPeriodStart: active.currentPeriodStart,
+            currentPeriodEnd: active.currentPeriodEnd,
+            cancelAtPeriodEnd: active.cancelAtPeriodEnd,
           }
-        : null,
+        : grant
+          ? { plan: 'complimentary', status: 'active', currentPeriodStart: grant.createdAt, currentPeriodEnd: grant.expiresAt, cancelAtPeriodEnd: false }
+          : subscription
+            ? {
+                plan: subscription.planCode,
+                status: subscription.status,
+                currentPeriodStart: subscription.currentPeriodStart,
+                currentPeriodEnd: subscription.currentPeriodEnd,
+                cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+              }
+            : null,
     };
   }
 
   async assertPro(user: AuthUser): Promise<void> {
-    const active = await this.activeSubscription(user.id);
-    if (!active) throw new ForbiddenException('Trip arrival adjustments require an active Travlio Pro membership.');
+    if (!(await this.hasPro(user.id))) throw new ForbiddenException('Trip arrival adjustments require an active Travlio Pro membership.');
   }
 
   async usage(user: AuthUser) {
     const monthStart = new Date();
     monthStart.setUTCDate(1);
     monthStart.setUTCHours(0, 0, 0, 0);
-    const [[completed], [reserved], account] = await Promise.all([
+    const [[completed], [reserved]] = await Promise.all([
       this.db
         .select({ n: count() })
         .from(generations)
@@ -134,9 +163,8 @@ export class MembershipService {
             inArray(generationJobs.status, ['queued', 'generating']),
           ),
         ),
-      this.db.query.users.findFirst({ where: eq(users.id, user.id) }),
     ]);
-    const plan = account?.plan ?? 'free';
+    const plan = (await this.hasPro(user.id)) ? 'pro' : 'free';
     return {
       plan,
       usedThisMonth: completed.n + reserved.n,
@@ -309,14 +337,23 @@ export class MembershipService {
         },
       });
 
-    const entitlement = await tx.query.membershipSubscriptions.findFirst({
-      where: and(
-        eq(membershipSubscriptions.userId, account.id),
-        inArray(membershipSubscriptions.status, [...ENTITLED_STATUSES]),
-        gt(membershipSubscriptions.currentPeriodEnd, new Date()),
-      ),
-    });
-    await tx.update(users).set({ plan: entitlement ? 'pro' : 'free' }).where(eq(users.id, account.id));
+    const [entitlement, grant] = await Promise.all([
+      tx.query.membershipSubscriptions.findFirst({
+        where: and(
+          eq(membershipSubscriptions.userId, account.id),
+          inArray(membershipSubscriptions.status, [...ENTITLED_STATUSES]),
+          gt(membershipSubscriptions.currentPeriodEnd, new Date()),
+        ),
+      }),
+      tx.query.complimentaryMembershipGrants.findFirst({
+        where: and(
+          eq(complimentaryMembershipGrants.userId, account.id),
+          isNull(complimentaryMembershipGrants.revokedAt),
+          gt(complimentaryMembershipGrants.expiresAt, new Date()),
+        ),
+      }),
+    ]);
+    await tx.update(users).set({ plan: entitlement || grant ? 'pro' : 'free' }).where(eq(users.id, account.id));
   }
 
   private subscriptionStatus(subscription: Stripe.Subscription) {
