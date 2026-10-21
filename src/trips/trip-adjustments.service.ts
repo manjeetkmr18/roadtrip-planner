@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { decodePolyline, encodePolyline, formatHHMM, haversineMeters, parseHHMM, scheduleDay, summarizeCosts, TripAdjustmentRequest, TripAssistantRequest, TripRequest, validatePlan, type DayPlan, type TripPlan } from '../core/index.js';
@@ -15,6 +15,7 @@ import { localIso } from '../planning/planner.js';
 import { timeZoneAt } from '../core/timezone.js';
 import { MembershipService } from '../membership/membership.service.js';
 import { RateLimiter } from '../common/rate-limit.js';
+import { TripNotesService } from './notes.service.js';
 import { ASSISTANT_MAX_TOKENS, ASSISTANT_PRO_MESSAGE, ASSISTANT_SCHEMA, ASSISTANT_SYSTEM, planDigest, readAssistantOutput } from './assistant.js';
 
 const HOTEL_RADIUS_METERS = 100_000;
@@ -171,6 +172,7 @@ export class TripAdjustmentsService {
     @Inject(ENV) private readonly env: Env,
     private readonly providers: Providers,
     private readonly membership: MembershipService,
+    @Optional() private readonly notes?: TripNotesService,
   ) {
     this.fx = new ExchangeRates(env.USD_CAD_RATE);
   }
@@ -195,7 +197,7 @@ export class TripAdjustmentsService {
       raw = await this.providers.llm.completeJson({
         system: ASSISTANT_SYSTEM,
         prompt: JSON.stringify({
-          plan: planDigest(trip.plan, draft),
+          plan: planDigest(trip.plan, draft, (await this.notes?.forPlanner(tripId, false)) ?? []),
           // Only the latest turns; the newest message is the traveller's.
           conversation: request.messages,
         }),

@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, HttpException, HttpStatus, OnApplicationShutdown, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, HttpException, HttpStatus, OnApplicationShutdown, OnModuleInit, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { TripNotesService } from './notes.service.js';
 import { and, count, desc, eq, gte, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { LatLng, TravelOptionsQuery, TripRequest, type TripRequest as TripRequestType } from '../core/index.js';
@@ -59,6 +60,8 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
     @Inject(ENV) private readonly env: Env,
     private readonly queue: GenerationQueue,
     private readonly providers: Providers,
+    /** Optional so unit tests can build the service without it. */
+    @Optional() private readonly notes?: TripNotesService,
   ) {
     const fx = new ExchangeRates(env.USD_CAD_RATE);
     this.planner = new TripPlanner(providers, { usdToCad: () => fx.usdToCad(), placesSearchesPerDay: env.PLACES_SEARCHES_PER_DAY });
@@ -416,7 +419,8 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
     const started = Date.now();
     try {
       const request = TripRequest.parse(t.request);
-      const plan = await this.planner.generate(request, ctx);
+      const notes = (await this.notes?.forPlanner(tripId)) ?? [];
+      const plan = await this.planner.generate(request, ctx, { notes });
       const committed = await this.db.transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${job.userId}, 0))`);
         const [completedJob] = await tx

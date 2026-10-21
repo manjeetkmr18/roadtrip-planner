@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
-import { TravelOptionsQuery, TripAdjustmentRequest, TripAssistantApplyRequest, TripAssistantRequest, TripRequest } from '../core/index.js';
+import { TravelOptionsQuery, TripAdjustmentRequest, TripAssistantApplyRequest, TripAssistantRequest, TripNoteInput, TripNoteUpdate, TripRequest } from '../core/index.js';
+import { TripNotesService } from './notes.service.js';
 import { ASSISTANT_PRO_MESSAGE } from './assistant.js';
 import { CurrentUser, VerifiedGuard, type AuthUser } from '../auth/auth.js';
 import { ZodPipe } from '../common/zod.pipe.js';
@@ -22,6 +23,7 @@ export class TripsController {
     private readonly trips: TripsService,
     private readonly adjustments: TripAdjustmentsService,
     private readonly membership: MembershipService,
+    private readonly notes: TripNotesService,
   ) {}
 
   @Get()
@@ -129,6 +131,35 @@ export class TripsController {
     @Param('adjustmentId', ParseUUIDPipe) adjustmentId: string,
   ) {
     return this.adjustments.undo(user, id, adjustmentId);
+  }
+
+  @Get(':id/notes')
+  @ApiEndpoint({ tag: 'Trip notes', summary: 'List your notes on a trip (whole trip first, then by day and time)', security: 'bearer', errors: [401, 403, 404] })
+  listNotes(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.notes.list(user, id);
+  }
+
+  @Post(':id/notes')
+  @ApiEndpoint({ tag: 'Trip notes', summary: 'Add a note: something to do on the trip or one day, optionally at a time and place', security: 'bearer', response: { status: 201, description: 'Note added' }, errors: [400, 401, 403, 404, 409] })
+  createNote(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(TripNoteInput)) body: TripNoteInput) {
+    return this.notes.create(user, id, body);
+  }
+
+  @Patch(':id/notes/:noteId')
+  @ApiEndpoint({ tag: 'Trip notes', summary: 'Edit a note', security: 'bearer', errors: [400, 401, 403, 404] })
+  updateNote(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('noteId', ParseUUIDPipe) noteId: string,
+    @Body(new ZodPipe(TripNoteUpdate)) body: TripNoteUpdate,
+  ) {
+    return this.notes.update(user, id, noteId, body);
+  }
+
+  @Delete(':id/notes/:noteId')
+  @ApiEndpoint({ tag: 'Trip notes', summary: 'Delete a note', security: 'bearer', errors: [401, 403, 404] })
+  removeNote(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Param('noteId', ParseUUIDPipe) noteId: string) {
+    return this.notes.remove(user, id, noteId);
   }
 
   @Post(':id/share')

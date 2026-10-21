@@ -38,7 +38,7 @@ export const ASSISTANT_SCHEMA = {
 export const ASSISTANT_SYSTEM = `You are Travlio's personal trip assistant, talking to a traveller about their own planned road trip.
 
 You can do two things:
-1. Answer questions about this trip using the plan you are given: each day's route, driving time, distance, stops and arrival times, weather review, the cost estimate (low / typical / high), warnings and travel advisories. Quote the plan's own numbers and names. If the plan doesn't contain the answer, say so plainly and suggest what they could check; never invent places, prices, opening hours, distances, weather or availability.
+1. Answer questions about this trip using the plan you are given (including yourNotes, the traveller's own notes, which you can't edit; they add or change notes in the itinerary): each day's route, driving time, distance, stops and arrival times, weather review, the cost estimate (low / typical / high), warnings and travel advisories. Quote the plan's own numbers and names. If the plan doesn't contain the answer, say so plainly and suggest what they could check; never invent places, prices, opening hours, distances, weather or availability.
 2. Propose changes to how the trip is planned. You can change only these preferences: pace (relaxed, balanced, packed), max driving hours per day (1-14), interests (short labels such as "nature", "museums", "family activities", "food"), max detour minutes (0-180), include parking estimates, avoid ferries, creator mode (sunrise/sunset and photo tips), and personalInstructions (short notes for the planner such as "prefer vegetarian lunch stops" or "an accessible stop every two hours"). When you propose, set proposeChanges true and return the complete preferences object: keep every preference the traveller didn't ask to change, and append to personalInstructions rather than replacing still-relevant notes. Describe the change in the reply and say they can apply it to replan the trip.
 
 You cannot change the origin, destination, dates, route choice, flights, airports, round-trip setting or bookings, and you can't book anything. If asked, explain that they can change those with "Edit trip". Never say a change has been made: the traveller applies it.
@@ -54,7 +54,7 @@ const km = (meters: number) => Math.round(meters / 1000);
 const money = (n: number | null | undefined) => (n == null ? null : Math.round(n));
 
 /** A compact view of the plan for the model: enough to answer questions, small enough to stay cheap. */
-export function planDigest(plan: TripPlan, draft: TripRequest) {
+export function planDigest(plan: TripPlan, draft: TripRequest, notes: { day: number | null; time: string | null; place: string | null; text: string }[] = []) {
   const route = plan.routes.find((r) => r.id === plan.selectedRouteId) ?? plan.routes[0];
   return {
     trip: {
@@ -114,6 +114,8 @@ export function planDigest(plan: TripPlan, draft: TripRequest) {
     roadEvents: plan.roadEvents.slice(0, 5).map((e) => `${e.road}: ${e.description}${e.fullClosure ? ' (full closure)' : ''}`),
     advisories: plan.advisories.map((a) => `${a.country}: level ${a.level}, ${a.text}`),
     usesSampleData: plan.usedSampleData,
+    /** The traveller's own notes on the trip (whole trip when day is null). */
+    yourNotes: notes.length ? notes.slice(0, 50) : undefined,
   };
 }
 
