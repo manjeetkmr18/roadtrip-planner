@@ -29,6 +29,7 @@ describe('MembershipService', () => {
         query: {
           users: { findFirst: vi.fn(async () => ({ role: 'user' })) },
           membershipSubscriptions: { findFirst },
+          storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
           complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
         },
       } as unknown as Db,
@@ -48,6 +49,7 @@ describe('MembershipService', () => {
         query: {
           users: { findFirst: vi.fn(async () => ({ role: 'user' })) },
           membershipSubscriptions: { findFirst: canceledFindFirst },
+          storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
           complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
         },
       } as unknown as Db,
@@ -63,6 +65,7 @@ describe('MembershipService', () => {
         query: {
           users: { findFirst: vi.fn(async () => ({ role: 'user' })) },
           membershipSubscriptions: { findFirst },
+          storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
           complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
         },
       } as unknown as Db,
@@ -88,6 +91,7 @@ describe('MembershipService', () => {
       query: {
         users: { findFirst: vi.fn(async () => ({ role: 'user' })) },
         membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
+        storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
         complimentaryMembershipGrants: { findFirst: vi.fn(async () => ({ id: 'grant-1' })) },
       },
     } as unknown as Db, loadEnv({}));
@@ -109,6 +113,7 @@ describe('MembershipService', () => {
       query: {
         users: { findFirst: vi.fn(async () => ({ role: 'user' })) },
         membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
+        storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
         complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
       },
     } as unknown as Db;
@@ -122,6 +127,7 @@ describe('MembershipService', () => {
       query: {
         users: { findFirst: vi.fn(async () => ({ role: 'admin' })) },
         membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
+        storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
         complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
       },
     } as unknown as Db, loadEnv({}));
@@ -167,6 +173,7 @@ describe('MembershipService', () => {
       query: {
         users: { findFirst: vi.fn(async () => ({ id: user.id })) },
         membershipSubscriptions: { findFirst: vi.fn(async () => ({ status: 'active' })) },
+        storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
         complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
       },
       update: (table: unknown) => ({

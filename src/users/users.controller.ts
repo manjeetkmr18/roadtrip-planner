@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Patch, UseGuards } from '@nestjs/common';
 import { CurrentUser, JwtGuard, type AuthUser } from '../auth/auth.js';
 import { ZodPipe } from '../common/zod.pipe.js';
 import { ApiEndpoint } from '../common/api-docs.decorator.js';
-import { UpdateUserProfile, UsersService } from './users.service.js';
+import { DeleteAccountRequest, UpdateUserProfile, UsersService } from './users.service.js';
 
 @Controller('users')
 @UseGuards(JwtGuard)
@@ -19,5 +19,12 @@ export class UsersController {
   @ApiEndpoint({ tag: 'Users', summary: 'Update the signed-in user name', security: 'bearer', errors: [400, 401, 404] })
   updateProfile(@CurrentUser() user: AuthUser, @Body(new ZodPipe(UpdateUserProfile)) profile: UpdateUserProfile) {
     return this.users.updateProfile(user.id, profile);
+  }
+
+  @Delete('me')
+  @HttpCode(200)
+  @ApiEndpoint({ tag: 'Users', summary: 'Delete the signed-in account and all its trips (cancels a web subscription first)', security: 'bearer', errors: [400, 401, 404, 409, 503] })
+  deleteAccount(@CurrentUser() user: AuthUser, @Body(new ZodPipe(DeleteAccountRequest)) body: DeleteAccountRequest) {
+    return this.users.deleteAccount(user.id, body);
   }
 }

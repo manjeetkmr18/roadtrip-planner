@@ -81,6 +81,8 @@ describe('AuthService email codes', () => {
       const db = {
         query: {
           membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
+          storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
+          users: { findFirst: vi.fn(async () => undefined) },
           complimentaryMembershipGrants: { findFirst: vi.fn(async () => ({ id: 'grant-1' })) },
         },
       } as unknown as Db;

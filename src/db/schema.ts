@@ -1,4 +1,4 @@
-import { boolean, geometry, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid, real } from 'drizzle-orm/pg-core';
+import { boolean, geometry, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, real } from 'drizzle-orm/pg-core';
 import type { TripPlan, TripRequest } from '../core/index.js';
 
 export const tripStatus = pgEnum('trip_status', ['draft', 'queued', 'generating', 'ready', 'failed']);
@@ -50,6 +50,35 @@ export const membershipWebhookEvents = pgTable('membership_webhook_events', {
   eventType: text('event_type').notNull(),
   processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * In-app subscriptions bought through the App Store or Google Play, as reported by RevenueCat.
+ * One row per user and entitlement; refreshed from RevenueCat's API on every webhook and app sync.
+ */
+export const storeSubscriptions = pgTable(
+  'store_subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    entitlement: text('entitlement').notNull(),
+    /** app_store | play_store | promotional | ... (RevenueCat's store name) */
+    store: text('store').notNull(),
+    productId: text('product_id').notNull(),
+    /** active | cancel_pending | billing_issue | expired | refunded */
+    status: text('status').notNull(),
+    /** Null = does not expire (lifetime). */
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    willRenew: boolean('will_renew').notNull().default(false),
+    sandbox: boolean('sandbox').notNull().default(false),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [uniqueIndex('store_subscriptions_user_entitlement_idx').on(t.userId, t.entitlement)],
+);
 
 export const complimentaryMembershipGrants = pgTable(
   'complimentary_membership_grants',

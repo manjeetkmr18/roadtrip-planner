@@ -156,6 +156,8 @@ POST /api/auth/register   POST /api/auth/login   GET /api/auth/me
 GET | PATCH /api/users/me
 GET /api/membership/plans   GET /api/membership/me   GET /api/membership/usage
 POST /api/membership/checkout   POST /api/membership/portal
+POST /api/membership/store/sync   POST /api/membership/store/webhook   (App Store / Google Play via RevenueCat)
+DELETE /api/users/me   (delete the account; cancels a web subscription first)
 GET  /api/trips           POST /api/trips        GET | PUT | DELETE /api/trips/:id
 GET  /api/places/photo?placeId=<place-id>   (short-lived image URL + author attribution)
 POST /api/trips/:id/generate     (plan or refresh)       GET /api/trips/usage
@@ -165,6 +167,28 @@ POST /api/feedback               GET /api/health
 ```
 
 Membership checkout accepts `{"plan":"monthly","idempotencyKey":"<uuid>"}` (`annual` is also supported). Pro access is granted only after a verified Stripe webhook updates server-side subscription state; a checkout redirect alone does not grant access. Configure matching monthly/yearly recurring Stripe prices and webhook events before enabling payments. Pricing/upgrade UI is not part of this API repository.
+
+### App Store and Google Play subscriptions (RevenueCat)
+
+The iOS and Android apps sell Pro with in-app purchases through [RevenueCat](https://www.revenuecat.com). Pro from
+any source (Stripe on the web, the App Store, Google Play, a complimentary grant, or the admin role) unlocks the same
+features everywhere; `src/membership/entitlements.ts` is the one place that decides it.
+
+- The app signs in to RevenueCat with the Travlio user ID (`Purchases.logIn(user.id)`), so purchases belong to the account.
+- After a purchase or restore the app calls `POST /api/membership/store/sync`; RevenueCat's webhook
+  (`POST /api/membership/store/webhook`) keeps renewals, cancellations, refunds and billing issues up to date.
+- Both re-read the customer from RevenueCat's REST API (`GET /v1/subscribers/{id}`) and store the result in
+  `store_subscriptions`. The webhook body is only used to know which account to re-read, so a forged event grants nothing.
+- Sandbox (TestFlight / test track) purchases count, so App Review can test Pro; `store_subscriptions.sandbox` marks them.
+- The table is created on first use; `drizzle/0008_store_subscriptions.sql` is safe to run afterwards.
+
+Setup:
+1. RevenueCat: create the project, add the iOS and Android apps, create the entitlement `pro` and attach the monthly
+   and annual products from App Store Connect and Google Play Console to it; put them in the `default` offering.
+2. RevenueCat → Integrations → Webhooks: URL `https://api.travlio.app/api/membership/store/webhook`, Authorization
+   header value = a long random string.
+3. Vercel: set `REVENUECAT_SECRET_KEY` (secret API key) and `REVENUECAT_WEBHOOK_AUTH` (the same random string).
+4. The app needs its public SDK keys (`EXPO_PUBLIC_REVENUECAT_IOS_KEY`, `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`); see the app's README.
 
 For the step-by-step Stripe test/live setup and remaining paid-launch work, see [the paid launch checklist](./docs/PAID_LAUNCH_CHECKLIST.md).
 

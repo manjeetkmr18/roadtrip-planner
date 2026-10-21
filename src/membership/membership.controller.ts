@@ -1,17 +1,23 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Inject, Post, Req, ServiceUnavailableException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpException, HttpStatus, Inject, Post, Req, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { CurrentUser, JwtGuard, VerifiedGuard, type AuthUser } from '../auth/auth.js';
 import { ZodPipe } from '../common/zod.pipe.js';
 import { ApiEndpoint } from '../common/api-docs.decorator.js';
 import { ENV, type Env } from '../config/env.js';
+import { RateLimiter } from '../common/rate-limit.js';
 import { CheckoutRequest, type CheckoutInput, MembershipService } from './membership.service.js';
+import { StoreBillingService } from './store-billing.js';
 
 type StripeWebhookRequest = Request & { rawBody?: Buffer };
 
 @Controller('membership')
 export class MembershipController {
+  /** The app syncs after a purchase or restore; each sync is one RevenueCat API call. */
+  private readonly syncLimit = new RateLimiter(10, 60_000);
+
   constructor(
     private readonly membership: MembershipService,
+    private readonly store: StoreBillingService,
     @Inject(ENV) private readonly env: Env,
   ) {}
 
@@ -58,5 +64,26 @@ export class MembershipController {
     const signature = request.headers['stripe-signature'];
     if (!signature || Array.isArray(signature)) throw new BadRequestException('Stripe signature header is missing');
     return this.membership.handleWebhook(request.rawBody, signature);
+  }
+
+  @Post('store/sync')
+  @HttpCode(200)
+  @UseGuards(JwtGuard)
+  @ApiEndpoint({ tag: 'Membership', summary: 'Re-check App Store / Google Play purchases (call after a purchase or restore)', security: 'bearer', errors: [401, 429, 503] })
+  async syncStore(@CurrentUser() user: AuthUser) {
+    if (!this.store.configured) throw new ServiceUnavailableException('In-app purchases are not configured');
+    if (this.syncLimit.hit(user.id)) {
+      throw new HttpException({ statusCode: 429, message: 'Too many purchase checks. Try again in a minute.' }, HttpStatus.TOO_MANY_REQUESTS);
+    }
+    await this.store.syncUser(user.id);
+    return this.membership.me(user);
+  }
+
+  @Post('store/webhook')
+  @HttpCode(200)
+  @ApiEndpoint({ tag: 'Membership', summary: 'Receive a RevenueCat webhook (App Store / Google Play subscriptions)', errors: [401, 503] })
+  storeWebhook(@Req() request: Request) {
+    const header = request.headers.authorization;
+    return this.store.handleWebhook(Array.isArray(header) ? header[0] : header, request.body);
   }
 }

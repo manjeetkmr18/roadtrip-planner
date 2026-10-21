@@ -17,6 +17,7 @@ describe('UsersService', () => {
       query: {
         users: { findFirst },
         membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
+        storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
         complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
       },
     } as unknown as Db);
@@ -58,6 +59,7 @@ describe('UsersService', () => {
       query: {
         users: { findFirst: vi.fn(async () => updated) },
         membershipSubscriptions: { findFirst: vi.fn(async () => undefined) },
+        storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
         complimentaryMembershipGrants: { findFirst: vi.fn(async () => undefined) },
       },
     } as unknown as Db);

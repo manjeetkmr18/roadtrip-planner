@@ -50,6 +50,13 @@
       "when": 1792539537746,
       "tag": "0007_session_invalidation",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792544107389,
+      "tag": "0008_store_subscriptions",
+      "breakpoints": true
     }
   ]
 }

@@ -69,6 +69,14 @@ export const EnvSchema = z.object({
   STRIPE_PRICE_ID_MONTHLY: optional,
   STRIPE_PRICE_ID_ANNUAL: optional,
   WEB_APP_URL: optional.pipe(z.url().optional()),
+  /** RevenueCat (App Store / Google Play subscriptions). Secret API key, used to re-read customers. */
+  REVENUECAT_SECRET_KEY: optional,
+  /** The Authorization header value set on the RevenueCat webhook (16+ random characters). */
+  REVENUECAT_WEBHOOK_AUTH: optional.refine((v) => !v || v.length >= 16, 'REVENUECAT_WEBHOOK_AUTH must be at least 16 characters'),
+  /** The RevenueCat entitlement that means Travlio Pro. */
+  REVENUECAT_ENTITLEMENT_ID: z.string().trim().min(1).default('pro'),
+  /** RevenueCat REST API base; only changed for local end-to-end tests. */
+  REVENUECAT_API_URL: z.url().default('https://api.revenuecat.com/v1'),
 
   /** Postgres pool size. Serverless functions should keep this small (use Neon's pooled URL). */
   DB_POOL_MAX: z.coerce.number().int().min(1).max(50).optional(),
@@ -99,6 +107,9 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   const stripeSettings = [env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET, env.STRIPE_PRICE_ID_MONTHLY, env.STRIPE_PRICE_ID_ANNUAL, env.WEB_APP_URL];
   if (stripeSettings.some(Boolean) && !stripeSettings.every(Boolean)) {
     throw new Error('Set STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, both Stripe price IDs, and WEB_APP_URL together');
+  }
+  if (!!env.REVENUECAT_SECRET_KEY !== !!env.REVENUECAT_WEBHOOK_AUTH) {
+    throw new Error('Set REVENUECAT_SECRET_KEY and REVENUECAT_WEBHOOK_AUTH together');
   }
   if (production && env.WEB_APP_URL && !env.WEB_APP_URL.startsWith('https://')) {
     throw new Error('Set WEB_APP_URL to an HTTPS URL in production');
