@@ -124,7 +124,8 @@ export class TripNotesService implements OnModuleInit {
       if (n >= MAX_TRIP_NOTES) throw new ConflictException(`A trip can have up to ${MAX_TRIP_NOTES} notes.`);
       const [row] = await tx
         .insert(tripNotes)
-        .values({ tripId, userId: user.id, text: note.text, day: note.day, time: note.time, place: note.place, includeInPlan: note.includeInPlan })
+        // A time only means something on a day.
+        .values({ tripId, userId: user.id, text: note.text, day: note.day, time: note.day == null ? null : note.time, place: note.place, includeInPlan: note.includeInPlan })
         .returning();
       return toNote(row);
     });
@@ -136,12 +137,18 @@ export class TripNotesService implements OnModuleInit {
     if (!Object.keys(patch).length) throw new BadRequestException('Nothing to change');
     this.checkDay(patch.day, trip.request);
     await this.ensureSchema();
+    // Moving a note to the whole trip drops its time; a time needs a day.
+    const changes = patch.day === null ? { ...patch, time: null } : patch;
     const [row] = await this.db
       .update(tripNotes)
-      .set(patch)
+      .set(changes)
       .where(and(eq(tripNotes.id, noteId), eq(tripNotes.tripId, tripId), eq(tripNotes.userId, user.id)))
       .returning();
     if (!row) throw new NotFoundException('Note not found');
+    if (row.day == null && row.time != null) {
+      const [fixed] = await this.db.update(tripNotes).set({ time: null }).where(eq(tripNotes.id, row.id)).returning();
+      return toNote(fixed);
+    }
     return toNote(row);
   }
 
