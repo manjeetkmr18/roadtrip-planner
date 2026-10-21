@@ -1,8 +1,8 @@
 # Travlio — Backend API
 
-NestJS API that plans Canada / cross-border road trips: routes, an itemised **low / typical / high** trip cost (fuel or charging, parking, and flights + rental car for fly + drive), a weather review for every driving day, realistic driving days, and stops checked against opening hours.
+NestJS API that plans road trips anywhere (with the richest live data for Canada and the US): routes, an itemised **low / typical / high** trip cost (fuel or charging, parking, and flights + rental car for fly + drive), a weather review for every driving day, realistic driving days, and stops checked against opening hours.
 
-The app is a separate repo: **[roadtrip-planner-app](https://github.com/manjeetkmr18/roadtrip-planner-app)**. It's a single Expo (React Native) codebase for iOS, Android and web, and it talks to this API over HTTP.
+The clients are separate repos that talk to this API over HTTP: the website **[travlio](https://github.com/manjeetkmr18/travlio)** (Next.js) and the iOS/Android app **[travlio-app](https://github.com/manjeetkmr18/travlio-app)** (Expo).
 
 ## Stack
 
@@ -106,6 +106,7 @@ Weather (Environment Canada, NWS, MET Norway, NASA POWER) and travel advisories 
 
 ## Accounts: email verification and password reset
 
+- Resetting a password signs the account out on every other device (`users.sessions_valid_after`, `drizzle/0007_session_invalidation.sql`). Deleted accounts are signed out straight away.
 - Sign-up emails a 6-digit code (valid 30 min). Trips (`/api/trips/*`) answer `403 EMAIL_NOT_VERIFIED` until it's entered (`POST /api/auth/verify-email`). Accounts made before this existed count as verified.
 - `POST /api/auth/forgot-password` emails a reset code (15 min); `POST /api/auth/reset-password` takes email + code + new password. The reply is the same whether or not the email has an account.
 - Codes are stored hashed, die after 5 wrong tries, and a new one can be sent once a minute.
@@ -158,7 +159,7 @@ POST /api/membership/checkout   POST /api/membership/portal
 GET  /api/trips           POST /api/trips        GET | PUT | DELETE /api/trips/:id
 GET  /api/places/photo?placeId=<place-id>   (short-lived image URL + author attribution)
 POST /api/trips/:id/generate     (plan or refresh)       GET /api/trips/usage
-POST /api/trips/:id/share        GET /api/share/:token   (public, read-only)
+POST | DELETE /api/trips/:id/share   GET /api/share/:token   (public, read-only)
 GET  /api/trips/saved-stops/nearby?lat=&lng=&radiusKm=   (PostGIS)
 POST /api/feedback               GET /api/health
 ```
@@ -187,7 +188,7 @@ Interactive docs (Swagger UI) are at **`/api/docs`**, and the OpenAPI spec at `/
 |---|---|
 | `npm run dev` | API with auto-reload |
 | `npm run build` / `npm start` | Production build / run |
-| `npm test` | 52 unit tests |
+| `npm test` | Unit tests (Vitest) |
 | `npm run typecheck` | TypeScript check |
 | `npm run db:generate` | New migration after changing `src/db/schema.ts` |
 | `npm run db:migrate` | Apply migrations (enables PostGIS) |
@@ -199,6 +200,8 @@ Interactive docs (Swagger UI) are at **`/api/docs`**, and the OpenAPI spec at `/
 - Set `WEB_ORIGIN` to the web app's URL. It controls CORS for browsers; separate several URLs with commas. The iOS and Android apps don't need it.
 - Phones reach the API over your network, so in development the API must be reachable from the phone (same Wi-Fi). It already listens on all network interfaces.
 - The BullMQ worker runs inside the API process. Add more instances to scale.
+- Rate limits are counted in memory per instance. On Vercel the client address comes from `x-vercel-forwarded-for` (set by Vercel); elsewhere set `TRUSTED_PROXY_CIDRS` for your proxies.
+- Shared links (`/api/share/:token`) show the plan without the owner's private assistant notes, provider notes or API spend. `DELETE /api/trips/:id/share` turns a link off.
 
 ### Hosting on Vercel (api.travlio.app) with Neon
 

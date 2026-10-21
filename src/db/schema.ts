@@ -15,6 +15,8 @@ export const users = pgTable('users', {
   stripeCustomerId: text('stripe_customer_id').unique(),
   /** Set once the user enters the code emailed at sign-up (or resets their password). */
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  /** Tokens issued before this moment are rejected (set on password reset). */
+  sessionsValidAfter: timestamp('sessions_valid_after', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

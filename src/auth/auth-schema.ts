@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import type { Db } from '../db/db.module.js';
 
 /**
- * The email-verification schema (also in drizzle/0001_email_codes.sql). Run on first use so a
+ * The email-verification and session schema (also in drizzle/0001_email_codes.sql and 0007_session_invalidation.sql). Run on first use so a
  * deployment works even before `npm run db:migrate`; every statement is safe to repeat.
  * Accounts that existed before verification was added are treated as verified.
  */
@@ -14,6 +14,7 @@ DO $$ BEGIN
     UPDATE "users" SET "email_verified_at" = "created_at";
   END IF;
 END $$;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "sessions_valid_after" timestamp with time zone;
 CREATE TABLE IF NOT EXISTS "auth_codes" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE cascade,

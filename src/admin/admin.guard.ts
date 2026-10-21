@@ -12,7 +12,7 @@ export class AdminGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext) {
-    this.jwt.canActivate(context);
+    await this.jwt.canActivate(context);
     const request = context.switchToHttp().getRequest<{ user: AuthUser }>();
     const account = await this.db.query.users.findFirst({
       where: eq(users.id, request.user.id),
