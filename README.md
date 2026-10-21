@@ -158,6 +158,7 @@ GET /api/membership/plans   GET /api/membership/me   GET /api/membership/usage
 POST /api/membership/checkout   POST /api/membership/portal
 POST /api/membership/store/sync   POST /api/membership/store/webhook   (App Store / Google Play via RevenueCat)
 DELETE /api/users/me   (delete the account; cancels a web subscription first)
+GET | POST /api/trips/:id/notes   PATCH | DELETE /api/trips/:id/notes/:noteId   (your own notes on a trip)
 GET  /api/trips           POST /api/trips        GET | PUT | DELETE /api/trips/:id
 GET  /api/places/photo?placeId=<place-id>   (short-lived image URL + author attribution)
 POST /api/trips/:id/generate     (plan or refresh)       GET /api/trips/usage
@@ -167,6 +168,19 @@ POST /api/feedback               GET /api/health
 ```
 
 Membership checkout accepts `{"plan":"monthly","idempotencyKey":"<uuid>"}` (`annual` is also supported). Pro access is granted only after a verified Stripe webhook updates server-side subscription state; a checkout redirect alone does not grant access. Configure matching monthly/yearly recurring Stripe prices and webhook events before enabling payments. Pricing/upgrade UI is not part of this API repository.
+
+### Trip notes
+
+Travellers can add their own notes to a trip: for the whole trip or one day, optionally with a time ("13:00") and a
+place, e.g. "Lunch with Priya in Kingston". Notes are stored apart from the plan (`trip_notes`), so replanning never
+loses them, and they're private (not in shared links).
+
+- Notes with "include in plan" (the default) go to the stop-choosing model on the next plan or refresh: a day with notes
+  gets one stop fewer per note so there's room, and the model prefers stops near a note's place and may mention it.
+  Notes don't add places to the route; add a stop to the trip for that.
+- The trip assistant sees all notes, so it can answer "what did I plan for day 3?".
+- Up to 50 notes per trip, 500 characters each; a note's day must be within the trip's dates. The table is created on
+  first use and by `drizzle/0009_trip_notes.sql`.
 
 ### App Store and Google Play subscriptions (RevenueCat)
 

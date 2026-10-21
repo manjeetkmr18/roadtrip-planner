@@ -211,6 +211,49 @@ export const TripAssistantApplyRequest = z.object({
 
 export type TripAssistantApplyRequest = z.infer<typeof TripAssistantApplyRequest>;
 
+// ---------- Trip notes ----------
+
+/** Most notes one trip can have. */
+export const MAX_TRIP_NOTES = 50;
+
+/**
+ * A traveller's own note on a trip: something they want to do, for the whole trip or one day,
+ * optionally at a place. With includeInPlan, the planner tries to fit it in the next time the trip is planned.
+ */
+export const TripNoteInput = z.object({
+  text: z.string().trim().min(1, 'Write a note').max(500),
+  /** 1-based trip day, or null for the whole trip. */
+  day: z.number().int().min(1).max(14).nullable().default(null),
+  /** Optional local time, e.g. "13:00" for lunch with a friend. */
+  time: hhmm.nullable().default(null),
+  /** Where it happens; pick from the place suggestions so it has a location. */
+  place: PlaceInput.nullable().default(null),
+  /** Give it to the planner, which leaves room for it the next time the trip is planned. */
+  includeInPlan: z.boolean().default(true),
+});
+export type TripNoteInput = z.input<typeof TripNoteInput>;
+
+/** Only the fields sent are changed (no defaults, so editing the text keeps the day, time and place). */
+export const TripNoteUpdate = z.object({
+  text: z.string().trim().min(1, 'Write a note').max(500),
+  day: z.number().int().min(1).max(14).nullable(),
+  time: hhmm.nullable(),
+  place: PlaceInput.nullable(),
+  includeInPlan: z.boolean(),
+}).partial();
+export type TripNoteUpdate = z.input<typeof TripNoteUpdate>;
+
+export interface TripNote {
+  id: string;
+  text: string;
+  day: number | null;
+  time: string | null;
+  place: PlaceInput | null;
+  includeInPlan: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ---------- Plan output ----------
 
 /** 'toll' and 'etr407' only appear in plans saved before tolls were removed from Travlio. */

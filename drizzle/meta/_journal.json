@@ -57,6 +57,13 @@
       "when": 1792544107389,
       "tag": "0008_store_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792554376320,
+      "tag": "0009_trip_notes",
+      "breakpoints": true
     }
   ]
 }

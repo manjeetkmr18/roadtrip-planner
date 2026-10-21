@@ -80,6 +80,32 @@ export const storeSubscriptions = pgTable(
   (t) => [uniqueIndex('store_subscriptions_user_entitlement_idx').on(t.userId, t.entitlement)],
 );
 
+/** The traveller's own notes on a trip (see TripNoteInput). Kept apart from the plan, so editing one never changes it. */
+export const tripNotes = pgTable(
+  'trip_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tripId: uuid('trip_id')
+      .notNull()
+      .references(() => trips.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    day: integer('day'),
+    /** HH:MM local time, optional. */
+    time: text('time'),
+    text: text('text').notNull(),
+    place: jsonb('place').$type<{ address: string; location?: { lat: number; lng: number }; placeId?: string }>(),
+    includeInPlan: boolean('include_in_plan').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [index('trip_notes_trip_idx').on(t.tripId, t.createdAt)],
+);
+
 export const complimentaryMembershipGrants = pgTable(
   'complimentary_membership_grants',
   {

@@ -34,6 +34,7 @@ import { nowIso, ProviderContext } from '../providers/infra.js';
 import { timeZoneAt } from '../core/timezone.js';
 import { legCostLines, parkingLine } from './route-costs.js';
 import { flyDriveCosts, flyDriveIssues, roadTripFor } from './fly-drive.js';
+import type { PlannerNote } from '../trips/notes.service.js';
 import { adjustForWeather, chooseStops, interestQueries, placeSetting, rankCandidates, toStop, weatherMood, type DayChoiceInput } from './stops.js';
 
 function timeZoneFor(p: ResolvedPlace): string {
@@ -161,7 +162,8 @@ export class TripPlanner {
     return { fastest, alternative };
   }
 
-  async generate(input: TripRequest, ctx = new ProviderContext()): Promise<TripPlan> {
+  /** `notes`: the traveller's own plans (trip notes marked "include in plan"); stops are chosen around them. */
+  async generate(input: TripRequest, ctx = new ProviderContext(), opts: { notes?: PlannerNote[] } = {}): Promise<TripPlan> {
     const started = nowIso();
     // Fly + drive: plan the road trip on the ground, from the arrival airport.
     const road = roadTripFor(input);
@@ -429,8 +431,16 @@ export class TripPlanner {
       di.candidates.slice(0, di.budget).forEach((c) => used.add(c.place.id));
     }
 
+    // The traveller's own plans for a day take time: leave room by planning one stop fewer per note (keep at least one).
+    const notes = opts.notes ?? [];
+    for (const di of dayInputs) {
+      di.travellerNotes = notes.filter((n) => n.day === di.day);
+      if (di.travellerNotes.length) di.budget = Math.max(1, di.budget - di.travellerNotes.length);
+    }
+
     // 6. AI arranges stops from the candidates; code schedules and checks them
     const choices = await chooseStops(dayInputs, {
+      tripNotes: notes.filter((n) => n.day == null),
       interests: req.preferences.interests,
       pace: req.preferences.pace,
       llm: p.llm,

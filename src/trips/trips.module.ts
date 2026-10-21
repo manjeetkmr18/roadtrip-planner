@@ -9,6 +9,7 @@ import { AuthModule } from '../auth/auth.js';
 import { MembershipModule } from '../membership/membership.module.js';
 import { ShareController, TripsController } from './trips.controller.js';
 import { GENERATION_QUEUE, GenerationQueue, TripsService } from './trips.service.js';
+import { TripNotesService } from './notes.service.js';
 import { TripAdjustmentsService } from './trip-adjustments.service.js';
 
 @Injectable()
@@ -72,6 +73,7 @@ export class TripsModule {
       providers: [
         TripsService,
         TripAdjustmentsService,
+        TripNotesService,
         opts.inline ? { provide: GenerationQueue, useClass: InlineGenerationQueue } : { provide: GenerationQueue, useClass: BullGenerationQueue },
         ...(opts.inline ? [] : [GenerationWorker]),
       ],
