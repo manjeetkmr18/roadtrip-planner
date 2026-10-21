@@ -9,6 +9,7 @@ import { and, count, desc, eq, gt, gte, ilike, inArray, isNull, or, sql } from '
 import { z } from 'zod';
 import type { AuthUser } from '../auth/auth.js';
 import { DB, type Db } from '../db/db.module.js';
+import { proAccess } from '../membership/entitlements.js';
 import {
   adminAuditLogs,
   complimentaryMembershipGrants,
@@ -304,23 +305,8 @@ export class AdminService {
         .update(complimentaryMembershipGrants)
         .set({ revokedAt: now, revokedByUserId: actor.id })
         .where(eq(complimentaryMembershipGrants.id, grantId));
-      const [subscription, otherGrant] = await Promise.all([
-        tx.query.membershipSubscriptions.findFirst({
-          where: and(
-            eq(membershipSubscriptions.userId, grant.userId),
-            inArray(membershipSubscriptions.status, ['active', 'trialing', 'cancel_pending']),
-            gt(membershipSubscriptions.currentPeriodEnd, now),
-          ),
-        }),
-        tx.query.complimentaryMembershipGrants.findFirst({
-          where: and(
-            eq(complimentaryMembershipGrants.userId, grant.userId),
-            isNull(complimentaryMembershipGrants.revokedAt),
-            gt(complimentaryMembershipGrants.expiresAt, now),
-          ),
-        }),
-      ]);
-      await tx.update(users).set({ plan: subscription || otherGrant ? 'pro' : 'free' }).where(eq(users.id, grant.userId));
+      const access = await proAccess(tx, grant.userId);
+      await tx.update(users).set({ plan: access.pro ? 'pro' : 'free' }).where(eq(users.id, grant.userId));
       await this.audit(tx, actor.id, 'pro_grant.revoked', grant.userId, { grantId, reason: request.reason });
       return { revoked: true, grantId };
     });

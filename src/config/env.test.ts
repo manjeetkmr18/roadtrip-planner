@@ -45,3 +45,12 @@ describe('trusted proxy configuration', () => {
     expect(() => loadEnv({ TRUSTED_PROXY_CIDRS: '10.0.0.1/33' })).toThrow(/valid IP address or CIDR/);
   });
 });
+
+describe('RevenueCat settings', () => {
+  it('requires the secret key and webhook auth together', async () => {
+    const { loadEnv } = await import('./env.js');
+    expect(() => loadEnv({ REVENUECAT_SECRET_KEY: 'sk' })).toThrow(/together/);
+    expect(() => loadEnv({ REVENUECAT_WEBHOOK_AUTH: 'webhook-auth-value-123' })).toThrow(/together/);
+    expect(loadEnv({ REVENUECAT_SECRET_KEY: 'sk', REVENUECAT_WEBHOOK_AUTH: 'webhook-auth-value-123' }).REVENUECAT_ENTITLEMENT_ID).toBe('pro');
+  });
+});

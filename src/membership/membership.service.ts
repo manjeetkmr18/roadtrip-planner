@@ -6,6 +6,7 @@ import { ENV, type Env } from '../config/env.js';
 import { DB, type Db } from '../db/db.module.js';
 import { complimentaryMembershipGrants, generationJobs, generations, membershipSubscriptions, membershipWebhookEvents, users } from '../db/schema.js';
 import type { AuthUser } from '../auth/auth.js';
+import { activeGrant, activeStoreSubscription, activeStripeSubscription, proAccess } from './entitlements.js';
 
 export const CheckoutRequest = z.object({
   plan: z.enum(['monthly', 'annual']),
@@ -21,7 +22,12 @@ const PRICE_SETTINGS: Record<PlanCode, StripePriceSetting> = {
   annual: 'STRIPE_PRICE_ID_ANNUAL',
 };
 
-const ENTITLED_STATUSES = ['active', 'trialing', 'cancel_pending'] as const;
+/** 'monthly' / 'annual' from a store product ID such as travlio_pro_annual or pro.monthly. */
+export function storePlanCode(productId: string): 'monthly' | 'annual' | string {
+  if (/annual|year|yearly|12m|p1y/i.test(productId)) return 'annual';
+  if (/month|monthly|1m|p1m/i.test(productId)) return 'monthly';
+  return productId;
+}
 
 function customerId(customer: string | Stripe.Customer | Stripe.DeletedCustomer): string {
   return typeof customer === 'string' ? customer : customer.id;
@@ -71,35 +77,8 @@ export class MembershipService {
     };
   }
 
-  private activeSubscription(userId: string) {
-    return this.db.query.membershipSubscriptions.findFirst({
-      where: and(
-        eq(membershipSubscriptions.userId, userId),
-        inArray(membershipSubscriptions.status, [...ENTITLED_STATUSES]),
-        gt(membershipSubscriptions.currentPeriodEnd, new Date()),
-      ),
-      orderBy: desc(membershipSubscriptions.currentPeriodEnd),
-    });
-  }
-
-  private activeGrant(userId: string) {
-    return this.db.query.complimentaryMembershipGrants.findFirst({
-      where: and(
-        eq(complimentaryMembershipGrants.userId, userId),
-        isNull(complimentaryMembershipGrants.revokedAt),
-        gt(complimentaryMembershipGrants.expiresAt, new Date()),
-      ),
-      orderBy: desc(complimentaryMembershipGrants.expiresAt),
-    });
-  }
-
   async hasPro(userId: string) {
-    const [account, subscription, grant] = await Promise.all([
-      this.db.query.users.findFirst({ where: eq(users.id, userId), columns: { role: true } }),
-      this.activeSubscription(userId),
-      this.activeGrant(userId),
-    ]);
-    return account?.role === 'admin' || !!(subscription || grant);
+    return (await proAccess(this.db, userId)).pro;
   }
 
   async plans() {
@@ -111,17 +90,35 @@ export class MembershipService {
   }
 
   async me(user: AuthUser) {
-    const active = await this.activeSubscription(user.id);
-    const grant = active ? undefined : await this.activeGrant(user.id);
-    const account = await this.db.query.users.findFirst({ where: eq(users.id, user.id), columns: { role: true } });
+    const [{ source }, active, store, grant, account] = await Promise.all([
+      proAccess(this.db, user.id),
+      activeStripeSubscription(this.db, user.id),
+      activeStoreSubscription(this.db, user.id),
+      activeGrant(this.db, user.id),
+      this.db.query.users.findFirst({ where: eq(users.id, user.id), columns: { role: true } }),
+    ]);
     const subscription = active ?? (await this.db.query.membershipSubscriptions.findFirst({
       where: eq(membershipSubscriptions.userId, user.id),
       orderBy: desc(membershipSubscriptions.updatedAt),
     }));
+    const storePlan = store ? storePlanCode(store.productId) : null;
     return {
-      plan: active || grant || account?.role === 'admin' ? 'pro' : 'free',
-      access: account?.role === 'admin' ? 'admin' : active ? 'subscription' : grant ? 'complimentary' : 'free',
-      subscription: active
+      plan: source ? 'pro' : 'free',
+      access: account?.role === 'admin' ? 'admin' : source ?? 'free',
+      /** Who bills the subscription: manage it there (Stripe portal on the web, or the store). */
+      billing: source === 'subscription' ? 'stripe' : source === 'store' && store ? store.store : null,
+      store: store
+        ? { store: store.store, productId: store.productId, status: store.status, expiresAt: store.expiresAt, willRenew: store.willRenew, sandbox: store.sandbox }
+        : null,
+      subscription: source === 'store' && store
+        ? {
+            plan: storePlan,
+            status: store.status === 'billing_issue' ? 'past_due' : store.status,
+            currentPeriodStart: null,
+            currentPeriodEnd: store.expiresAt,
+            cancelAtPeriodEnd: !store.willRenew,
+          }
+        : active
         ? {
             plan: active.planCode,
             status: active.status,
@@ -252,6 +249,32 @@ export class MembershipService {
     return { url: session.url };
   }
 
+  /**
+   * Before an account is deleted: cancel any Stripe subscription that could still bill, right away.
+   * Throws if one can't be cancelled, so a deleted account is never left being charged.
+   */
+  async cancelStripeForDeletion(userId: string) {
+    const billing = await this.db.query.membershipSubscriptions.findMany({
+      where: and(
+        eq(membershipSubscriptions.userId, userId),
+        inArray(membershipSubscriptions.status, ['incomplete', 'trialing', 'active', 'past_due', 'cancel_pending', 'unpaid', 'paused']),
+      ),
+      columns: { stripeSubscriptionId: true },
+    });
+    if (!billing.length) return { cancelled: 0 };
+    const stripe = this.stripe();
+    for (const { stripeSubscriptionId } of billing) {
+      try {
+        await stripe.subscriptions.cancel(stripeSubscriptionId);
+      } catch (e) {
+        if (e instanceof Stripe.errors.StripeInvalidRequestError && /No such subscription|canceled/i.test(e.message)) continue;
+        this.log.error(`could not cancel ${stripeSubscriptionId} before account deletion: ${(e as Error).message}`);
+        throw new ServiceUnavailableException('Could not cancel your subscription, so the account was not deleted. Please try again.');
+      }
+    }
+    return { cancelled: billing.length };
+  }
+
   async handleWebhook(rawBody: Buffer, signature: string | undefined) {
     if (!signature) throw new ServiceUnavailableException('Stripe signature header is missing');
     const stripe = this.stripe(true);
@@ -341,23 +364,8 @@ export class MembershipService {
         },
       });
 
-    const [entitlement, grant] = await Promise.all([
-      tx.query.membershipSubscriptions.findFirst({
-        where: and(
-          eq(membershipSubscriptions.userId, account.id),
-          inArray(membershipSubscriptions.status, [...ENTITLED_STATUSES]),
-          gt(membershipSubscriptions.currentPeriodEnd, new Date()),
-        ),
-      }),
-      tx.query.complimentaryMembershipGrants.findFirst({
-        where: and(
-          eq(complimentaryMembershipGrants.userId, account.id),
-          isNull(complimentaryMembershipGrants.revokedAt),
-          gt(complimentaryMembershipGrants.expiresAt, new Date()),
-        ),
-      }),
-    ]);
-    await tx.update(users).set({ plan: entitlement || grant ? 'pro' : 'free' }).where(eq(users.id, account.id));
+    const access = await proAccess(tx, account.id);
+    await tx.update(users).set({ plan: access.pro ? 'pro' : 'free' }).where(eq(users.id, account.id));
   }
 
   private subscriptionStatus(subscription: Stripe.Subscription) {

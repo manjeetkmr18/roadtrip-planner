@@ -35,6 +35,7 @@ function harness(queue: GenerationQueue, pro = false, completedGenerations = 0, 
       membershipSubscriptions: {
         findFirst: vi.fn(async () => undefined),
       },
+      storeSubscriptions: { findFirst: vi.fn(async () => undefined) },
       complimentaryMembershipGrants: {
         findFirst: vi.fn(async () => pro ? { id: 'grant-1', expiresAt: new Date(Date.now() + 60_000) } : undefined),
       },

@@ -7,6 +7,7 @@ import { TtlCache } from '../providers/infra.js';
 import { travelOptions } from '../planning/travel-options.js';
 import type { TravelOptions, TripPlan } from '../core/index.js';
 import { DB, type Db } from '../db/db.module.js';
+import { proAccess } from '../membership/entitlements.js';
 import { complimentaryMembershipGrants, generationJobs, generations, membershipSubscriptions, trips, tripStops, users } from '../db/schema.js';
 import { ENV, type Env } from '../config/env.js';
 import { Providers } from '../providers/providers.module.js';
@@ -79,24 +80,7 @@ export class TripsService implements OnModuleInit, OnApplicationShutdown {
   private readonly optionsCache = new TtlCache<TravelOptions>(10 * 60_000);
 
   private async hasPro(tx: Parameters<Parameters<Db['transaction']>[0]>[0], userId: string) {
-    const [account, subscription, grant] = await Promise.all([
-      tx.query.users.findFirst({ where: eq(users.id, userId), columns: { role: true } }),
-      tx.query.membershipSubscriptions.findFirst({
-        where: and(
-          eq(membershipSubscriptions.userId, userId),
-          inArray(membershipSubscriptions.status, [...PRO_STATUSES]),
-          gt(membershipSubscriptions.currentPeriodEnd, new Date()),
-        ),
-      }),
-      tx.query.complimentaryMembershipGrants.findFirst({
-        where: and(
-          eq(complimentaryMembershipGrants.userId, userId),
-          isNull(complimentaryMembershipGrants.revokedAt),
-          gt(complimentaryMembershipGrants.expiresAt, new Date()),
-        ),
-      }),
-    ]);
-    return account?.role === 'admin' || !!(subscription || grant);
+    return (await proAccess(tx, userId)).pro;
   }
 
   async travelOptions(query: TravelOptionsQuery) {

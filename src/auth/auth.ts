@@ -27,6 +27,7 @@ import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { and, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DB, type Db } from '../db/db.module.js';
+import { proAccess } from '../membership/entitlements.js';
 import { authCodes, complimentaryMembershipGrants, membershipSubscriptions, users } from '../db/schema.js';
 import { ENV, type Env } from '../config/env.js';
 import { ZodPipe } from '../common/zod.pipe.js';
@@ -78,23 +79,8 @@ export class AuthService {
   }
 
   private async userView(u: UserRow) {
-    const [subscription, grant] = await Promise.all([
-      this.db.query.membershipSubscriptions.findFirst({
-        where: and(
-          eq(membershipSubscriptions.userId, u.id),
-          inArray(membershipSubscriptions.status, ['active', 'trialing', 'cancel_pending']),
-          gt(membershipSubscriptions.currentPeriodEnd, new Date()),
-        ),
-      }),
-      this.db.query.complimentaryMembershipGrants.findFirst({
-        where: and(
-          eq(complimentaryMembershipGrants.userId, u.id),
-          isNull(complimentaryMembershipGrants.revokedAt),
-          gt(complimentaryMembershipGrants.expiresAt, new Date()),
-        ),
-      }),
-    ]);
-    return { ...publicUser(u), plan: subscription || grant ? 'pro' : 'free' };
+    const access = await proAccess(this.db, u.id);
+    return { ...publicUser(u), plan: access.pro ? 'pro' : 'free' };
   }
 
   private async session(u: UserRow) {
